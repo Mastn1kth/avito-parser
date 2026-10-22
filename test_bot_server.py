@@ -94,3 +94,27 @@ def test_bot_encodes_pasted_cyrillic_and_rejects_path_traversal(monkeypatch, tmp
     assert "%D0%B0" in jobs.started[0][1][-1]
     bot.execute("/delete", "../outside")
     assert "Неверное имя" in sent[-1][1]["text"]
+
+
+def test_main_keyboard_add_link_and_cancel(monkeypatch):
+    sent = []
+    monkeypatch.setattr(telegram_notify, "call", lambda token, method, payload=None: sent.append((method, payload)))
+    jobs = FakeJobs()
+    bot = bot_server.Bot("123:abc", 42, jobs)
+
+    def say(text):
+        bot.handle({"message": {"chat": {"id": 42}, "text": text}})
+
+    say("/start")
+    keyboard = sent[-1][1]["reply_markup"]["keyboard"]
+    assert any(button["text"] == "➕ Добавить ссылку" for row in keyboard for button in row)
+    say("➕ Добавить ссылку")
+    assert bot.awaiting_link
+    say("не ссылка")
+    assert jobs.started == []
+    say("🏠 Главное меню")
+    assert not bot.awaiting_link
+    say("➕ Добавить ссылку")
+    say("https://www.avito.ru/rossiya/telefony?q=айфон")
+    assert jobs.started[0][0] == "add"
+    assert "%D0%B0" in jobs.started[0][1][-1]

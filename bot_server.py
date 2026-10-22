@@ -17,6 +17,24 @@ import telegram_notify
 
 ROOT = Path(__file__).resolve().parent
 OFFSET_PATH = ROOT / "data" / "bot-offset.txt"
+MENU_BUTTONS = {
+    "🔎 Готовые поиски": "/presets",
+    "📂 Мои поиски": "/searches",
+    "✅ Выбрать для слежения": "/select",
+    "➕ Добавить ссылку": "/add",
+    "📡 Статус": "/status",
+    "⏹ Остановить слежение": "/stop",
+    "🏠 Главное меню": "/start",
+}
+
+
+def main_keyboard() -> dict:
+    return {"keyboard": [
+        [{"text": "🔎 Готовые поиски"}, {"text": "📂 Мои поиски"}],
+        [{"text": "✅ Выбрать для слежения"}, {"text": "➕ Добавить ссылку"}],
+        [{"text": "📡 Статус"}, {"text": "⏹ Остановить слежение"}],
+        [{"text": "🏠 Главное меню"}],
+    ], "resize_keyboard": True, "is_persistent": True}
 
 
 def buttons(rows: list[tuple[str, str]]) -> dict:
@@ -37,6 +55,7 @@ class Bot:
         self.jobs = jobs or bot_jobs.Jobs()
         self.selected: set[str] = set()
         self.pending_deletes: dict[str, str] = {}
+        self.awaiting_link = False
 
     def send(self, message: str, markup: dict | None = None) -> None:
         payload = {"chat_id": self.chat_id, "text": message[:3900]}
@@ -50,11 +69,13 @@ class Bot:
             self.send("Поисков пока нет. Откройте /presets или отправьте /add <ссылка Авито>.")
             return
         rows = [(avito.load_search(path.stem).title, f"search:{path.stem}") for path in items]
+        rows.append(("🏠 Главное меню", "menu"))
         self.send("Мои поиски. Выберите один или запустите /watch имя1 имя2:", buttons(rows))
 
     def show_presets(self) -> None:
         self.send("Готовые поиски по всей России:",
-                  buttons([(p.title, f"preset:{p.name}") for p in presets.PRESETS]))
+                  buttons([(p.title, f"preset:{p.name}") for p in presets.PRESETS] +
+                          [("🏠 Главное меню", "menu")]))
 
     def select_searches(self) -> None:
         names = [path.stem for path in sorted(avito.SEARCHES_DIR.glob("*.json"))]
@@ -65,6 +86,7 @@ class Bot:
         rows = [(f"{'✅' if name in self.selected else '▫️'} {avito.load_search(name).title}",
                  f"toggle:{name}") for name in names]
         rows.append((f"▶ Следить за выбранными ({len(self.selected)})", "watchselected"))
+        rows.append(("🏠 Главное меню", "menu"))
         self.send("Выберите поиски для наблюдения:", buttons(rows))
 
     def search_actions(self, name: str) -> None:
@@ -75,6 +97,7 @@ class Bot:
         self.send(f"{search.title}\nИмя: {name}", buttons([
             ("▶ Следить", f"watch:{name}"), ("⟳ Собрать", f"scan:{name}"),
             ("📊 Таблица Excel", f"table:{name}"), ("🗑 Удалить", f"delete:{name}"),
+            ("📂 Мои поиски", "searches"),
         ]))
 
     def start_job(self, key: str, args: list[str], kind: str) -> None:
@@ -110,11 +133,10 @@ class Bot:
 
     def execute(self, command: str, argument: str = "") -> None:
         if command in ("/start", "/help"):
-            self.send("Управление поисками Авито:\n"
-                      "/presets — готовые поиски; /searches — мои поиски;\n"
-                      "/add <ссылка> — добавить; /scan <имя> — собрать; /table <имя> — Excel;\n"
-                      "/select — выбрать поиски кнопками; /watch <имя> [имя...] — следить; /stop — остановить;\n"
-                      "/delete <имя> — удалить с подтверждением; /status — состояние; /test — тест.")
+            self.awaiting_link = False
+            self.send("Управление поисками Авито. Выберите действие кнопкой внизу. "
+                      "Свою ссылку можно прислать после кнопки «Добавить ссылку». "
+                      "Команды /watch, /scan, /table и /delete тоже работают.", main_keyboard())
         elif command == "/presets":
             self.show_presets()
         elif command in ("/searches", "/list"):
@@ -128,7 +150,12 @@ class Bot:
             self.send("✅ Telegram-бот отвечает.")
         elif command == "/stop":
             self.send("Наблюдение остановлено." if self.jobs.stop_watch() else "Наблюдение не запущено этим сервером.")
+        elif command == "/add" and not argument:
+            self.awaiting_link = True
+            self.send("Пришлите ссылку на результаты поиска Авито одним сообщением. "
+                      "Чтобы отменить, нажмите «Главное меню».")
         elif command == "/add" and argument:
+            self.awaiting_link = False
             self.start_job("add", ["add", safe_url(argument)], "Добавление")
         elif command in ("/scan", "/table", "/delete") and argument:
             name = argument.strip()
@@ -184,6 +211,10 @@ class Bot:
                     self.start_job("add", ["add", "--name", name, "--profile", preset.profile, preset.url], "Добавление")
             elif action == "search":
                 self.search_actions(name)
+            elif action == "searches":
+                self.searches()
+            elif action == "menu":
+                self.execute("/start")
             elif action == "toggle" and re.fullmatch(r"[a-z0-9_-]+", name):
                 if (avito.SEARCHES_DIR / f"{name}.json").exists():
                     self.selected.symmetric_difference_update({name})
@@ -214,6 +245,16 @@ class Bot:
             return
         text = str(message.get("text") or "").strip()
         if not text:
+            return
+        if text in MENU_BUTTONS:
+            self.execute(MENU_BUTTONS[text])
+            return
+        if self.awaiting_link and not text.startswith("/"):
+            if text.startswith(("https://", "http://")):
+                self.execute("/add", text)
+            else:
+                self.send("Нужна ссылка, начинающаяся с https://www.avito.ru/. "
+                          "Или нажмите «Главное меню» для отмены.")
             return
         command, _, argument = text.partition(" ")
         self.execute(command.split("@", 1)[0].lower(), argument.strip())
