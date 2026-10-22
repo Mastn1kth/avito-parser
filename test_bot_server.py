@@ -3,6 +3,7 @@ import json
 import pytest
 
 import avito
+import bot_outbox
 import bot_server
 import telegram_notify
 
@@ -145,3 +146,19 @@ def test_corrupt_search_does_not_crash_button_menu(monkeypatch, tmp_path):
     assert "ошибка файла" in sent[-1][1]["reply_markup"]["inline_keyboard"][0][0]["text"]
     bot.search_actions("broken")
     assert "повреждён" in sent[-1][1]["text"]
+
+
+def test_bot_queues_button_menu_when_telegram_is_offline(monkeypatch, tmp_path):
+    def offline(token, method, payload=None):
+        raise telegram_notify.TelegramNetworkError("offline")
+
+    monkeypatch.setattr(telegram_notify, "call", offline)
+    outbox = bot_outbox.Outbox(tmp_path / "outbox.json")
+    bot = bot_server.Bot("123:abc", 42, FakeJobs(), outbox=outbox)
+    bot.handle({"message": {"chat": {"id": 42}, "text": "/start"}})
+    assert len(bot_outbox.Outbox(outbox.path).pending) == 1
+
+    delivered = []
+    monkeypatch.setattr(telegram_notify, "call", lambda token, method, payload=None: delivered.append(payload))
+    outbox.drain("123:abc")
+    assert delivered[0]["reply_markup"]["keyboard"]

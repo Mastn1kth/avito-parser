@@ -14,6 +14,7 @@ from urllib.parse import quote, urlsplit, urlunsplit
 
 import avito
 import bot_jobs
+import bot_outbox
 import presets
 import telegram_notify
 
@@ -74,10 +75,12 @@ def single_instance_lock():
 
 
 class Bot:
-    def __init__(self, token: str, chat_id: int, jobs: bot_jobs.Jobs | None = None) -> None:
+    def __init__(self, token: str, chat_id: int, jobs: bot_jobs.Jobs | None = None,
+                 outbox: bot_outbox.Outbox | None = None) -> None:
         self.token = token
         self.chat_id = chat_id
         self.jobs = jobs or bot_jobs.Jobs()
+        self.outbox = outbox
         self.selected: set[str] = set()
         self.pending_deletes: dict[str, str] = {}
         self.awaiting_link = False
@@ -86,7 +89,11 @@ class Bot:
         payload = {"chat_id": self.chat_id, "text": message[:3900]}
         if markup:
             payload["reply_markup"] = markup
-        telegram_notify.call(self.token, "sendMessage", payload)
+        if self.outbox:
+            self.outbox.enqueue("message", payload)
+            self.outbox.drain(self.token)
+        else:
+            telegram_notify.call(self.token, "sendMessage", payload)
 
     def searches(self) -> None:
         items = sorted(avito.SEARCHES_DIR.glob("*.json"))
@@ -154,8 +161,12 @@ class Bot:
                 if kind == "Таблица":
                     table = next((e for e in reversed(events) if e.get("event") == "TABLE"), None)
                     if table:
-                        telegram_notify.send_document(self.token, self.chat_id, Path(table["path"]))
-                        self.send("Таблица отправлена.")
+                        if self.outbox:
+                            self.outbox.enqueue("document", {"chat_id": self.chat_id, "path": table["path"]})
+                            self.outbox.drain(self.token)
+                        else:
+                            telegram_notify.send_document(self.token, self.chat_id, Path(table["path"]))
+                            self.send("Таблица отправлена.")
                     else:
                         self.send("Таблица не была создана.")
                 elif kind == "Сбор":
@@ -242,7 +253,10 @@ class Bot:
         if callback:
             if int((callback.get("from") or {}).get("id", 0)) != self.chat_id:
                 return
-            telegram_notify.call(self.token, "answerCallbackQuery", {"callback_query_id": callback["id"]})
+            try:
+                telegram_notify.call(self.token, "answerCallbackQuery", {"callback_query_id": callback["id"]})
+            except telegram_notify.TelegramError:
+                logging.warning("Could not acknowledge Telegram button; continuing action")
             action, _, name = str(callback.get("data") or "").partition(":")
             if action == "preset":
                 preset = presets.get(name)
@@ -311,12 +325,14 @@ def main() -> None:
     (ROOT / "data").mkdir(exist_ok=True)
     logging.basicConfig(filename=ROOT / "data" / "bot-server.log", level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(message)s")
-    bot = Bot(settings["token"], int(settings["chat_id"]))
+    bot = Bot(settings["token"], int(settings["chat_id"]),
+              outbox=bot_outbox.Outbox(ROOT / "data" / "bot-outbox.json"))
     offset = int(OFFSET_PATH.read_text(encoding="ascii")) if OFFSET_PATH.exists() else 0
     print("Telegram-сервер запущен. Остановить: Ctrl+C", flush=True)
     try:
         while True:
             try:
+                bot.outbox.drain(bot.token)
                 updates = telegram_notify.call(bot.token, "getUpdates", {"offset": offset, "timeout": 10})
                 for update in updates or []:
                     try:
