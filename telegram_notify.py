@@ -13,6 +13,7 @@ from __future__ import annotations
 import html
 import json
 import os
+import re
 import time
 import urllib.error
 import urllib.request
@@ -52,6 +53,8 @@ def save_settings(settings: dict[str, Any], path: Path = SETTINGS_PATH) -> None:
 
 def call(token: str, method: str, payload: dict[str, Any] | None = None) -> Any:
     """One Bot API call; a network hiccup is retried before giving up."""
+    if not re.fullmatch(r"[0-9]+:[A-Za-z0-9_-]+", token):
+        raise TelegramError("неверный формат токена бота: скопируйте токен целиком из @BotFather, без пробелов и кириллицы")
     for attempt in range(NETWORK_ATTEMPTS):
         try:
             return _call_once(token, method, payload)

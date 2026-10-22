@@ -1,6 +1,7 @@
 import json
 
 import avito
+import pytest
 import telegram_notify
 
 
@@ -50,6 +51,14 @@ def test_telegram_messages_escape_html_and_carry_link():
     }
     text = telegram_notify.message_for("realty-owner", "flats", realty_alert)
     assert "Черновик" in text and "12 000 000 ₽" in text
+
+
+@pytest.mark.parametrize("token", ["123:abcаdef", "123:abc\u00a0def", "вставьте токен"])
+def test_invalid_telegram_token_is_rejected_before_request(token, monkeypatch):
+    monkeypatch.setattr(telegram_notify, "_call_once", lambda *args: pytest.fail("network request was made"))
+
+    with pytest.raises(telegram_notify.TelegramError, match="неверный формат токена"):
+        telegram_notify.call(token, "getMe")
 
 
 def test_only_recently_listed_items_are_fresh():
