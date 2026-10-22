@@ -1,6 +1,7 @@
 from openpyxl import load_workbook
 
 import avito_client
+import avito
 import goods
 import profiles
 
@@ -32,6 +33,15 @@ def test_title_gives_model_memory_and_city():
     assert offer.delivery_only is True
     assert offer.avito_price_badge == "Цена ниже рыночной"
     assert offer.seller == "частное лицо"
+
+
+def test_all_russia_search_accepts_private_sellers_from_any_city():
+    search = avito.Search(name="pcs", title="PCs", profile="goods",
+                          catalog_url="https://www.avito.ru/rossiya/nastolnye_kompyutery", params={})
+    item = phone(1, 9000, city="kazan", title="Системный блок")
+
+    assert search.home_city == ""
+    assert profiles.GoodsProfile({}, search.home_city).alert(item) is not None
 
 
 def test_market_median_ignores_defects_and_extremes():

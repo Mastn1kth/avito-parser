@@ -29,6 +29,14 @@ def test_slug_prefix_goes_back_to_cyrillic():
     assert lr.slug_prefix_in_cyrillic("nizhniy_novgorod", 4) == "нижн"
 
 
+def test_all_russia_location_does_not_need_city_suggest():
+    class NoRequests:
+        def get_json(self, *args, **kwargs):
+            pytest.fail("city suggest should not be called")
+
+    assert lr.resolve_location(NoRequests(), "rossiya", {}, referer="https://www.avito.ru/rossiya") == (660311, "Вся Россия")
+
+
 def test_filter_blob_decodes_attribute_value_pairs():
     assert lr.decode_filter_blob("ASgBAgICA0SSA8YQygiCWZC~DZauNQ") == [
         (201, 1059), (549, 5697), (110536, 437131),

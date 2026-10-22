@@ -163,7 +163,8 @@ class Search:
     @property
     def home_city(self) -> str:
         """The city slug of the search page, e.g. "sankt-peterburg"."""
-        return urlsplit(self.catalog_url).path.strip("/").split("/")[0]
+        slug = urlsplit(self.catalog_url).path.strip("/").split("/")[0]
+        return "" if slug == "rossiya" else slug
 
     def load(self, file: str) -> dict[str, Any]:
         return load_json(self.path(file))

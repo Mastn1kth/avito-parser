@@ -154,6 +154,8 @@ def parse_link(url: str) -> ParsedLink:
 
 def resolve_location(client: avito_client.CalmClient, slug: str, cache: dict[str, Any], *, referer: str) -> tuple[int, str]:
     """Location id and name for a city slug, asking Avito's suggest."""
+    if slug == "rossiya":
+        return 660311, "Вся Россия"
     if slug in cache:
         return int(cache[slug]["id"]), cache[slug]["name"]
     for letters in (5, 4, 3):
