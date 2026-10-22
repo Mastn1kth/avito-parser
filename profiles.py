@@ -8,7 +8,6 @@
 
 from __future__ import annotations
 
-import statistics
 import re
 
 from pathlib import Path
@@ -16,6 +15,7 @@ from typing import Any
 
 import apartments
 import goods
+import laptop_prices
 
 
 # --- realty-owner -----------------------------------------------------------
@@ -122,7 +122,10 @@ class GoodsProfile:
         self.refresh_market()
 
     def refresh_market(self) -> None:
-        self.stats = goods.market_stats([goods.offer_from_item(item) for item in self.base.values()])
+        offers = [goods.offer_from_item(item) for item in self.base.values()]
+        self.stats = goods.market_stats(goods.market_sample(
+            offers, private_only=self.alert_sellers == "private"
+        ))
 
     def alert(self, item: dict[str, Any]) -> dict[str, Any] | None:
         offer = goods.offer_from_item(item)
@@ -142,7 +145,9 @@ class GoodsProfile:
 
     def write_table(self, path: Path, seen_before: dict[str, str]) -> dict[str, int]:
         offers = [goods.offer_from_item(item) for item in self.base.values()]
-        stats = goods.market_stats(offers)
+        stats = goods.market_stats(goods.market_sample(
+            offers, private_only=self.alert_sellers == "private"
+        ))
         goods.annotate(offers, stats, self.home_city)
         for offer in offers:
             offer.listing.is_new = str(offer.listing.id) not in seen_before
@@ -151,31 +156,39 @@ class GoodsProfile:
 
 
 class LaptopDealsProfile(GoodsProfile):
-    """Alert on plausible low prices against the current private-laptop sample."""
+    """Alert only when enough comparable private listings exist."""
 
     name = "laptop-deals"
-    MIN_SAMPLE = 20
 
     def refresh_market(self) -> None:
-        super().refresh_market()
-        prices = [offer.listing.price for item in self.base.values()
-                  if (offer := goods.offer_from_item(item)).seller == "частное лицо"
-                  and not offer.defect and offer.listing.price]
-        self.laptop_median = round(statistics.median(prices)) if len(prices) >= self.MIN_SAMPLE else None
+        offers = [goods.offer_from_item(item) for item in self.base.values()]
+        self.laptop_medians = laptop_prices.medians(offers)
 
     def alert(self, item: dict[str, Any]) -> dict[str, Any] | None:
-        fields = super().alert(item)
         offer = goods.offer_from_item(item)
-        price = offer.listing.price
-        median = self.laptop_median
-        if fields is None or offer.defect or not price or median is None:
+        if self.home_city and offer.city and offer.city != self.home_city:
             return None
+        if self.alert_sellers == "private" and (
+            offer.seller != "частное лицо" or
+            (offer.listing.closed_listings or 0) >= goods.SHOP_CLOSED_LISTINGS
+        ):
+            return None
+        key = laptop_prices.model_key(offer.listing.title)
+        price = offer.listing.price
+        reference = self.laptop_medians.get(key) if key else None
+        if offer.defect or not price or reference is None:
+            return None
+        median = reference.median
         if not 0.5 * median <= price <= 0.85 * median:
             return None
+        fields = goods.alert_fields(offer)
         fields["market"] = goods.price_text(median)
         fields["vs_market"] = f"{price / median - 1:+.0%}"
         fields["price_assessment"] = goods.price_comparison(price / median - 1)
-        fields["notes"].append("ниже медианы ноутбуков; характеристики проверьте вручную")
+        fields["notes"].append(
+            f"медиана: {reference.source}, {reference.count} объявлений; "
+            "состояние и характеристики проверьте вручную"
+        )
         return fields
 
 

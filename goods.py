@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 import statistics
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,7 @@ OUTLIER_LOW = 0.5
 OUTLIER_HIGH = 1.8
 CHEAP_SHARE = 0.85
 MIN_GROUP_SIZE = 3
+MARKET_MAX_AGE_DAYS = 14
 # A "private" seller with this many closed listings is a shop or a reseller.
 SHOP_CLOSED_LISTINGS = 100
 
@@ -110,6 +112,22 @@ def market_stats(offers: list[Offer]) -> dict[str, GroupStats]:
             low=kept[0], q1=round(q1), median=round(median), q3=round(q3), high=kept[-1],
         )
     return result
+
+
+def market_sample(offers: list[Offer], *, private_only: bool = True,
+                  now: float | None = None) -> list[Offer]:
+    """Recent comparable listings used as the price baseline."""
+    now = time.time() if now is None else now
+    sample = []
+    for offer in offers:
+        stamp = offer.listing.timestamp_ms
+        if stamp and now - stamp / 1000 > MARKET_MAX_AGE_DAYS * 86400:
+            continue
+        if private_only and (offer.seller != "частное лицо" or
+                             (offer.listing.closed_listings or 0) >= SHOP_CLOSED_LISTINGS):
+            continue
+        sample.append(offer)
+    return sample
 
 
 def annotate(

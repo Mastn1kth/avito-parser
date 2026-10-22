@@ -3,6 +3,7 @@ from openpyxl import load_workbook
 import avito_client
 import avito
 import goods
+import laptop_prices
 import profiles
 
 
@@ -44,16 +45,44 @@ def test_all_russia_search_accepts_private_sellers_from_any_city():
     assert profiles.GoodsProfile({}, search.home_city).alert(item) is not None
 
 
-def test_laptop_deals_use_private_sample_median_and_reject_extremes():
-    base = {str(i): phone(i, 10_000, title=f"Ноутбук модель {i}") for i in range(20)}
+def test_laptop_deals_compare_same_model_and_reject_extremes():
+    base = {str(i): phone(i, 10_000, title="Lenovo ThinkPad T480") for i in range(5)}
+    base.update({str(i): phone(i, 100_000, title="MacBook Air 13 M4 16/256") for i in range(5, 25)})
     profile = profiles.LaptopDealsProfile(base)
 
-    cheap = profile.alert(phone(21, 8_000, title="Ноутбук рабочий"))
+    cheap = profile.alert(phone(30, 8_000, title="ThinkPad T480 рабочий"))
     assert cheap is not None and cheap["vs_market"] == "-20%"
-    assert profile.alert(phone(22, 4_000, title="Ноутбук рабочий")) is None
-    assert profile.alert(phone(23, 9_000, title="Ноутбук рабочий")) is None
-    assert profile.alert(phone(24, 8_000, title="Ноутбук не работает")) is None
-    assert profiles.LaptopDealsProfile({}).alert(phone(25, 8_000)) is None
+    assert profile.alert(phone(31, 60_000, title="ThinkPad T480")) is None
+    assert profile.alert(phone(32, 4_000, title="ThinkPad T480")) is None
+    assert profile.alert(phone(33, 9_000, title="ThinkPad T480")) is None
+    assert profile.alert(phone(34, 8_000, title="ThinkPad T480 не работает")) is None
+    assert profile.alert(phone(35, 8_000, title="Ноутбук без модели")) is None
+    assert profiles.LaptopDealsProfile({}).alert(phone(36, 8_000)) is None
+
+
+def test_laptop_model_key_separates_macbook_memory_and_chip():
+    assert laptop_prices.model_key("MacBook Air 13 M4 16/256 Sky Blue") == "macbook air 13 m4 16/256"
+    assert laptop_prices.model_key("MacBook Air 13 M5 16/256") == "macbook air 13 m5 16/256"
+    assert laptop_prices.model_key("MacBook Air 13 M4 16/512") == "macbook air 13 m4 16/512"
+    assert laptop_prices.model_key("Ноутбук Acer Aspire 15.6 / 8 ГБ") is None
+
+
+def test_laptop_references_skip_old_ads_and_label_shop_fallback():
+    now = 2_000_000_000
+    items = [phone(i, 70_000, title="MacBook Neo 13 8/256", seller="Компания") for i in range(5)]
+    for item in items:
+        item["sortTimeStamp"] = now * 1000
+    old = phone(6, 10_000, title="MacBook Neo 13 8/256")
+    old["sortTimeStamp"] = (now - 30 * 86400) * 1000
+    reference = laptop_prices.medians([goods.offer_from_item(item) for item in [*items, old]], now=now)
+
+    assert reference["macbook neo 13 8/256"].median == 70_000
+    assert reference["macbook neo 13 8/256"].source == "все продавцы"
+    profile = profiles.LaptopDealsProfile({str(item["id"]): item for item in items})
+    alert = profile.alert(phone(7, 55_000, title="MacBook Neo 13 8/256"))
+    assert alert is not None
+    assert alert["price_assessment"] == "на 21% дешевле медианы"
+    assert "все продавцы" in alert["notes"][0]
 
 
 def test_monitor_alert_ignores_accessories_and_unrelated_titles():
@@ -74,6 +103,19 @@ def test_market_median_ignores_defects_and_extremes():
     assert stats.count == 5
     assert stats.used == 4
     assert stats.median == 35_500
+
+
+def test_market_sample_uses_recent_private_listings():
+    now = 2_000_000_000
+    private = phone(1, 35_000)
+    private["sortTimeStamp"] = now * 1000
+    company = phone(2, 20_000, seller="Компания")
+    company["sortTimeStamp"] = now * 1000
+    old = phone(3, 25_000)
+    old["sortTimeStamp"] = (now - 30 * 86400) * 1000
+    offers = [goods.offer_from_item(item) for item in (private, company, old)]
+
+    assert [offer.listing.id for offer in goods.market_sample(offers, now=now)] == [1]
 
 
 def test_annotations_mark_cheap_defect_shop_and_other_city():
