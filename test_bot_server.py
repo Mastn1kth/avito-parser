@@ -162,3 +162,26 @@ def test_bot_queues_button_menu_when_telegram_is_offline(monkeypatch, tmp_path):
     monkeypatch.setattr(telegram_notify, "call", lambda token, method, payload=None: delivered.append(payload))
     outbox.drain("123:abc")
     assert delivered[0]["reply_markup"]["keyboard"]
+
+
+def test_table_button_sends_generated_workbook(monkeypatch, tmp_path):
+    sent = []
+    monkeypatch.setattr(telegram_notify, "call", lambda token, method, payload=None: sent.append(method))
+    monkeypatch.setattr(telegram_notify, "send_document",
+                        lambda token, chat_id, path: sent.append((chat_id, path.name)))
+    monkeypatch.setattr(avito, "SEARCHES_DIR", tmp_path)
+    (tmp_path / "phones.json").write_text(json.dumps({
+        "title": "phones", "profile": "goods", "catalog_url": "https://www.avito.ru/rossiya/telefony",
+        "params": {"categoryId": "84", "locationId": "660311"},
+    }), encoding="utf-8")
+    workbook = tmp_path / "phones.xlsx"
+    workbook.write_bytes(b"test")
+
+    class CompletingJobs(FakeJobs):
+        def run(self, key, args, done):
+            done({"ok": True, "events": [{"event": "TABLE", "path": str(workbook)}], "error": ""})
+            return True
+
+    bot = bot_server.Bot("123:abc", 42, CompletingJobs())
+    bot.execute("/table", "phones")
+    assert (42, "phones.xlsx") in sent
