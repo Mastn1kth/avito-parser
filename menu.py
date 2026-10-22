@@ -16,6 +16,7 @@ from pathlib import Path
 
 import avito
 import avito_client
+import presets
 import telegram_notify
 
 # Some terminals (e.g. embedded panes) never answer the cursor position
@@ -153,6 +154,19 @@ def new_search() -> None:
         watch([name])
 
 
+def ready_searches() -> None:
+    choice = choose("Готовые поиски:", [preset.title for preset in presets.PRESETS])
+    if choice is None:
+        return
+    preset = presets.PRESETS[choice]
+    if (avito.SEARCHES_DIR / f"{preset.name}.json").exists():
+        print(f"«{preset.title}» уже есть в «Мои поиски».")
+        return
+    run(avito.cmd_add, url=preset.url, name=preset.name, profile=preset.profile,
+        city=None, watch_pages=avito.DEFAULT_WATCH_PAGES, dry_run=False,
+        replace=False, delay=5.0)
+
+
 def my_searches() -> None:
     while True:
         items = searches()
@@ -269,6 +283,7 @@ def loop() -> None:
         print(f"\n{LINE}\n  АВИТО-ПОИСКИ\n{LINE}")
         choice = choose("", [
             "Новый поиск по ссылке",
+            "Готовые поиски",
             f"Мои поиски ({len(searches())})",
             "Следить за несколькими поисками сразу",
             f"Telegram: {telegram}",
@@ -276,7 +291,7 @@ def loop() -> None:
         if choice is None:
             return
         try:
-            [new_search, my_searches, watch_several, telegram_menu][choice]()
+            [new_search, ready_searches, my_searches, watch_several, telegram_menu][choice]()
         except KeyboardInterrupt:
             print("\nВозврат в меню.")
 
