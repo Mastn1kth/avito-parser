@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import logging
+import json
 import os
 import re
 import time
@@ -92,7 +93,8 @@ class Bot:
         if not items:
             self.send("Поисков пока нет. Откройте /presets или отправьте /add <ссылка Авито>.")
             return
-        rows = [(avito.load_search(path.stem).title, f"search:{path.stem}") for path in items]
+        rows = [(self.search_title(path) or f"⚠️ {path.stem} (ошибка файла)",
+                 f"search:{path.stem}") for path in items]
         rows.append(("🏠 Главное меню", "menu"))
         self.send("Мои поиски. Выберите один или запустите /watch имя1 имя2:", buttons(rows))
 
@@ -107,7 +109,8 @@ class Bot:
         if not names:
             self.send("Поисков пока нет. Откройте /presets.")
             return
-        rows = [(f"{'✅' if name in self.selected else '▫️'} {avito.load_search(name).title}",
+        rows = [(f"{'✅' if name in self.selected else '▫️'} "
+                 f"{self.search_title(avito.SEARCHES_DIR / f'{name}.json') or '⚠️ ' + name + ' (ошибка файла)'}",
                  f"toggle:{name}") for name in names]
         rows.append((f"▶ Следить за выбранными ({len(self.selected)})", "watchselected"))
         rows.append(("🏠 Главное меню", "menu"))
@@ -117,12 +120,28 @@ class Bot:
         if not re.fullmatch(r"[a-z0-9_-]+", name) or not (avito.SEARCHES_DIR / f"{name}.json").exists():
             self.send("Этот поиск уже удалён.")
             return
-        search = avito.load_search(name)
-        self.send(f"{search.title}\nИмя: {name}", buttons([
+        title = self.search_title(avito.SEARCHES_DIR / f"{name}.json")
+        if title is None:
+            self.send(f"Поиск «{name}» повреждён. Можно удалить его конфигурацию; "
+                      "собранные данные останутся на ПК.", buttons([
+                          ("🗑 Удалить", f"delete:{name}"), ("📂 Мои поиски", "searches")
+                      ]))
+            return
+        self.send(f"{title}\nИмя: {name}", buttons([
             ("▶ Следить", f"watch:{name}"), ("⟳ Собрать", f"scan:{name}"),
             ("📊 Таблица Excel", f"table:{name}"), ("🗑 Удалить", f"delete:{name}"),
             ("📂 Мои поиски", "searches"),
         ]))
+
+    @staticmethod
+    def search_title(path: Path) -> str | None:
+        try:
+            config = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(config, dict) or not all(key in config for key in ("profile", "catalog_url", "params")):
+                raise ValueError("missing search fields")
+            return str(config.get("title") or path.stem)
+        except (OSError, ValueError, TypeError):
+            return None
 
     def start_job(self, key: str, args: list[str], kind: str) -> None:
         def finished(result: dict) -> None:

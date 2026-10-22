@@ -132,3 +132,16 @@ def test_second_bot_server_cannot_take_lock(monkeypatch, tmp_path):
         first.close()
     second = bot_server.single_instance_lock()
     second.close()
+
+
+def test_corrupt_search_does_not_crash_button_menu(monkeypatch, tmp_path):
+    sent = []
+    monkeypatch.setattr(telegram_notify, "call", lambda token, method, payload=None: sent.append((method, payload)))
+    monkeypatch.setattr(avito, "SEARCHES_DIR", tmp_path)
+    (tmp_path / "broken.json").write_text("{bad", encoding="utf-8")
+    bot = bot_server.Bot("123:abc", 42, FakeJobs())
+
+    bot.execute("/searches")
+    assert "ошибка файла" in sent[-1][1]["reply_markup"]["inline_keyboard"][0][0]["text"]
+    bot.search_actions("broken")
+    assert "повреждён" in sent[-1][1]["text"]
