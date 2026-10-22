@@ -163,7 +163,33 @@ def my_searches() -> None:
         for search in items:
             stored = len(search.load("listings.json"))
             labels.append(f"{search.title}  ({stored} объявл.)")
-        picked = choose("Мои поиски:", labels)
+        if interactive():
+            from questionary.prompts.common import InquirerControl
+
+            choices = [questionary.Choice(label, value=index) for index, label in enumerate(labels)]
+            choices.append(questionary.Choice("Назад", value=BACK))
+            prompt = questionary.select(
+                "Мои поиски:", choices=choices,
+                instruction="(стрелки, Enter; два пробела — удалить поиск)",
+            )
+            control = next(c for c in prompt.application.layout.find_all_controls()
+                           if isinstance(c, InquirerControl))
+
+            @prompt.application.key_bindings.add(" ", " ", eager=True)
+            def delete_selected(event):
+                event.app.exit(result=("delete", control.get_pointed_at().value))
+
+            picked = prompt.ask()
+            if isinstance(picked, tuple) and picked[0] == "delete":
+                index = picked[1]
+                if index != BACK and confirm(f"Удалить «{items[index].title}» из «Мои поиски»? Данные останутся на диске."):
+                    (avito.SEARCHES_DIR / f"{items[index].name}.json").unlink()
+                    print("Поиск удалён.")
+                continue
+            if picked == BACK:
+                return
+        else:
+            picked = choose("Мои поиски:", labels)
         if picked is None:
             return
         search = items[picked]
