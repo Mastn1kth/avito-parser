@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 import time
 import secrets
@@ -17,6 +18,7 @@ import telegram_notify
 
 ROOT = Path(__file__).resolve().parent
 OFFSET_PATH = ROOT / "data" / "bot-offset.txt"
+LOCK_PATH = ROOT / "data" / "bot-server.lock"
 MENU_BUTTONS = {
     "🔎 Готовые поиски": "/presets",
     "📂 Мои поиски": "/searches",
@@ -46,6 +48,28 @@ def safe_url(url: str) -> str:
     parts = urlsplit(url.strip())
     return urlunsplit((parts.scheme, parts.netloc, quote(parts.path, safe="/%"),
                        quote(parts.query, safe="=&%+/:?"), parts.fragment))
+
+
+def single_instance_lock():
+    """Keep an OS lock for the lifetime of this process; stale files are safe."""
+    LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
+    handle = LOCK_PATH.open("a+b")
+    try:
+        handle.seek(0)
+        if not handle.read(1):
+            handle.write(b"0")
+            handle.flush()
+        handle.seek(0)
+        if os.name == "nt":
+            import msvcrt
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        handle.close()
+        raise SystemExit("Telegram-сервер уже запущен. Используйте открытое окно сервера.") from None
+    return handle
 
 
 class Bot:
@@ -186,7 +210,7 @@ class Bot:
                 self.send("Наблюдение запущено: " + ", ".join(names) +
                           ". Текущая выдача будет запомнена, уведомления — о новых объявлениях.")
             else:
-                self.send("Наблюдение уже работает. Остановите его через /stop перед новым выбором.")
+                self.send(getattr(self.jobs, "last_watch_error", "") or "Наблюдение не запустилось.")
         else:
             self.send("Команда не распознана. Откройте /help.")
 
@@ -261,6 +285,7 @@ class Bot:
 
 
 def main() -> None:
+    lock = single_instance_lock()
     settings = telegram_notify.load_settings()
     if not settings.get("token") or not settings.get("chat_id"):
         raise SystemExit("Сначала выполните: python -m uv run python avito.py telegram setup")
@@ -281,12 +306,19 @@ def main() -> None:
                         logging.error("Update failed: %s", exc)
                     offset = int(update["update_id"]) + 1
                     OFFSET_PATH.write_text(str(offset), encoding="ascii")
+                stopped = bot.jobs.take_stopped_watch()
+                if stopped:
+                    bot.send(stopped)
             except telegram_notify.TelegramError as exc:
                 logging.error("Polling failed: %s", exc)
                 time.sleep(5)
     except KeyboardInterrupt:
-        bot.jobs.stop_watch()
         print("Telegram-сервер остановлен.", flush=True)
+    finally:
+        try:
+            bot.jobs.stop_watch()
+        finally:
+            lock.close()
 
 
 if __name__ == "__main__":

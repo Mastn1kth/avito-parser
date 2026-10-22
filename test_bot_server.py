@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 import avito
 import bot_server
 import telegram_notify
@@ -118,3 +120,15 @@ def test_main_keyboard_add_link_and_cancel(monkeypatch):
     say("https://www.avito.ru/rossiya/telefony?q=айфон")
     assert jobs.started[0][0] == "add"
     assert "%D0%B0" in jobs.started[0][1][-1]
+
+
+def test_second_bot_server_cannot_take_lock(monkeypatch, tmp_path):
+    monkeypatch.setattr(bot_server, "LOCK_PATH", tmp_path / "server.lock")
+    first = bot_server.single_instance_lock()
+    try:
+        with pytest.raises(SystemExit, match="уже запущен"):
+            bot_server.single_instance_lock()
+    finally:
+        first.close()
+    second = bot_server.single_instance_lock()
+    second.close()

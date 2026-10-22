@@ -8,6 +8,7 @@ import signal
 import subprocess
 import sys
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Callable
@@ -23,6 +24,7 @@ class Jobs:
         self.watch: subprocess.Popen | None = None
         self.watch_names: list[str] = []
         self.watch_log = None
+        self.last_watch_error = ""
 
     def run(self, key: str, args: list[str], done: Callable[[dict], None]) -> bool:
         with self.lock:
@@ -60,12 +62,29 @@ class Jobs:
     def watch_running(self) -> bool:
         return self.watch is not None and self.watch.poll() is None
 
+    def take_stopped_watch(self) -> str | None:
+        """Return one notice when the watched process exits by itself."""
+        with self.lock:
+            if self.watch is None or self.watch.poll() is None:
+                return None
+            notice = (f"Наблюдение остановилось: {', '.join(self.watch_names)} "
+                      f"(код {self.watch.returncode}). Подробности: data/bot-watch.log")
+            self.watch = None
+            self.watch_names = []
+            if self.watch_log:
+                self.watch_log.close()
+                self.watch_log = None
+            return notice
+
     def start_watch(self, names: list[str]) -> bool:
         with self.lock:
+            self.last_watch_error = ""
             if self.watch_running():
+                self.last_watch_error = "Наблюдение уже работает. Остановите его перед новым выбором."
                 return False
             log_path = ROOT / "data" / "bot-watch.log"
             log_path.parent.mkdir(parents=True, exist_ok=True)
+            start_offset = log_path.stat().st_size if log_path.exists() else 0
             self.watch_log = log_path.open("a", encoding="utf-8")
             flags = subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0
             try:
@@ -78,7 +97,30 @@ class Jobs:
                 self.watch_log = None
                 raise
             self.watch_names = names
-            return True
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            with log_path.open("r", encoding="utf-8", errors="replace") as reader:
+                reader.seek(start_offset)
+                lines = reader.readlines()
+            for line in lines:
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if event.get("event") == "WATCH":
+                    return True
+                if event.get("event") == "FATAL":
+                    self.last_watch_error = str(event.get("error") or "ошибка запуска")
+                    self.stop_watch()
+                    return False
+            if not self.watch_running():
+                self.last_watch_error = f"Наблюдение завершилось при запуске (код {self.watch.returncode})."
+                self.stop_watch()
+                return False
+            time.sleep(0.1)
+        self.last_watch_error = "Парсер не подтвердил запуск за 10 секунд. Проверьте журнал data/bot-watch.log."
+        self.stop_watch()
+        return False
 
     def stop_watch(self) -> bool:
         with self.lock:
@@ -89,17 +131,20 @@ class Jobs:
                     self.watch_log = None
                 return False
             assert self.watch is not None
-            if sys.platform == "win32":
-                self.watch.send_signal(signal.CTRL_BREAK_EVENT)
-            else:
-                self.watch.send_signal(signal.SIGINT)
             try:
+                if sys.platform == "win32":
+                    self.watch.send_signal(signal.CTRL_BREAK_EVENT)
+                else:
+                    self.watch.send_signal(signal.SIGINT)
                 self.watch.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                self.watch.terminate()
-                self.watch.wait(timeout=10)
-            self.watch_names = []
-            if self.watch_log:
-                self.watch_log.close()
-                self.watch_log = None
+            except (OSError, subprocess.TimeoutExpired):
+                if self.watch.poll() is None:
+                    self.watch.terminate()
+                    self.watch.wait(timeout=10)
+            finally:
+                self.watch_names = []
+                self.watch = None
+                if self.watch_log:
+                    self.watch_log.close()
+                    self.watch_log = None
             return True

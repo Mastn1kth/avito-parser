@@ -38,6 +38,7 @@ import item_page
 import link_resolver
 import profiles
 import telegram_notify
+import watch_lock
 
 BASE_DIR = Path(__file__).resolve().parent
 SEARCHES_DIR = BASE_DIR / "searches"
@@ -375,9 +376,14 @@ def cmd_watch(args: argparse.Namespace) -> None:
         watched.append((search, base, search.load("seen.json"),
                         profiles.PROFILES[search.profile](base, search.home_city, search.alert_sellers)))
         search.dir.mkdir(parents=True, exist_ok=True)
-    say("WATCH", searches=[s.name for s in searches], interval_s=args.interval, telegram=notifier is not None)
+    lock_context = watch_lock.watch_locks(DATA_DIR, [s.name for s in searches])
+    try:
+        lock_context.__enter__()
+    except RuntimeError as exc:
+        fail(str(exc))
     cycle = 0
     try:
+        say("WATCH", searches=[s.name for s in searches], interval_s=args.interval, telegram=notifier is not None)
         while True:
             active = [entry for entry in watched if (SEARCHES_DIR / f"{entry[0].name}.json").exists()]
             for search, *_ in watched:
@@ -442,6 +448,8 @@ def cmd_watch(args: argparse.Namespace) -> None:
     except KeyboardInterrupt:
         if not JSON_OUTPUT:
             print("\nОстановлено. Новые объявления сохранены; следующий watch продолжит с этого места.")
+    finally:
+        lock_context.__exit__(None, None, None)
 
 
 def cmd_table(args: argparse.Namespace) -> None:
