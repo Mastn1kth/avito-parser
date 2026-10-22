@@ -65,6 +65,29 @@ def call(token: str, method: str, payload: dict[str, Any] | None = None) -> Any:
     raise AssertionError("unreachable")
 
 
+def send_document(token: str, chat_id: int, path: Path) -> None:
+    """Upload a locally generated Excel workbook to the configured chat."""
+    import uuid
+
+    boundary = uuid.uuid4().hex
+    body = (
+        f"--{boundary}\r\nContent-Disposition: form-data; name=\"chat_id\"\r\n\r\n{chat_id}\r\n"
+        f"--{boundary}\r\nContent-Disposition: form-data; name=\"document\"; filename=\"{path.name}\"\r\n"
+        "Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet\r\n\r\n"
+    ).encode("utf-8") + path.read_bytes() + f"\r\n--{boundary}--\r\n".encode("ascii")
+    request = urllib.request.Request(
+        API.format(token=token, method="sendDocument"), data=body,
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=60) as response:
+            answer = json.loads(response.read().decode("utf-8"))
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        raise TelegramError(f"не удалось отправить таблицу: {exc}") from None
+    if not answer.get("ok"):
+        raise TelegramError(f"Telegram: {answer.get('description')}")
+
+
 class TelegramNetworkError(TelegramError):
     pass
 
@@ -149,7 +172,8 @@ def realty_message(search_title: str, alert: dict[str, Any]) -> str:
 def goods_message(search_title: str, alert: dict[str, Any]) -> str:
     market = ""
     if alert.get("vs_market"):
-        market = f" · рынок {esc(alert['market'])} ({esc(alert['vs_market'])})"
+        assessment = alert.get("price_assessment") or alert["vs_market"]
+        market = f" · медиана {esc(alert['market'])}, {esc(assessment)}"
     lines = [
         f"📱 <b>{esc(alert['title'])}</b>",
         f"💰 <b>{esc(alert['price'])}</b>{market}",

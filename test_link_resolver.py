@@ -61,6 +61,8 @@ def test_listing_link_and_foreign_site_are_rejected():
         lr.parse_link("https://www.avito.ru/sankt-peterburg/telefony/iphone_15_128_gb_8157171618")
     with pytest.raises(lr.LinkError):
         lr.parse_link("https://example.org/kazan/telefony")
+    with pytest.raises(lr.LinkError):
+        lr.parse_link("https://fakeavito.ru/kazan/telefony")
 
 
 def test_filters_are_matched_by_unique_value_when_attribute_differs():

@@ -128,7 +128,7 @@ class ParsedLink:
 
 def parse_link(url: str) -> ParsedLink:
     parts = urlsplit(url.strip())
-    if not parts.netloc.endswith("avito.ru"):
+    if parts.hostname != "avito.ru" and not (parts.hostname or "").endswith(".avito.ru"):
         raise LinkError("это не ссылка на avito.ru")
     segments = [segment for segment in parts.path.split("/") if segment]
     if len(segments) < 1:
