@@ -174,6 +174,7 @@ class LaptopDealsProfile(GoodsProfile):
             return None
         fields["market"] = goods.price_text(median)
         fields["vs_market"] = f"{price / median - 1:+.0%}"
+        fields["price_assessment"] = goods.price_comparison(price / median - 1)
         fields["notes"].append("ниже медианы ноутбуков; характеристики проверьте вручную")
         return fields
 

@@ -139,9 +139,19 @@ def annotate(
             offer.notes.append(f"другой город: {offer.city}")
 
 
+def price_comparison(vs_market: float | None) -> str:
+    if vs_market is None:
+        return "нет достаточной выборки"
+    if vs_market < 0:
+        return f"на {abs(vs_market):.0%} дешевле медианы"
+    if vs_market > 0:
+        return f"на {vs_market:.0%} дороже медианы"
+    return "по медиане"
+
+
 COLUMNS = (
     ("Новое", 8), ("Группа", 22), ("Цена, ₽", 11), ("Рынок (медиана), ₽", 13),
-    ("К рынку", 9), ("Оценка Авито", 18), ("Заметки", 40), ("Продавец", 14),
+    ("К медиане", 9), ("Оценка цены", 28), ("Оценка Авито", 18), ("Заметки", 40), ("Продавец", 14),
     ("Завершённых объявлений", 11), ("Опубликовано", 14), ("Адрес", 30),
     ("Заголовок", 34), ("Ссылка", 10), ("Описание", 70),
 )
@@ -183,6 +193,7 @@ def write_workbook(path: Path, offers: list[Offer], stats: dict[str, GroupStats]
             listing.price,
             offer.market,
             f"{offer.vs_market:+.0%}" if offer.vs_market is not None else "",
+            price_comparison(offer.vs_market),
             offer.avito_price_badge,
             "; ".join(offer.notes),
             offer.seller,
@@ -219,6 +230,7 @@ def alert_fields(offer: Offer) -> dict[str, Any]:
         "price": price_text(listing.price),
         "market": price_text(offer.market),
         "vs_market": f"{offer.vs_market:+.0%}" if offer.vs_market is not None else "",
+        "price_assessment": price_comparison(offer.vs_market),
         "avito_badge": offer.avito_price_badge,
         "seller": offer.seller,
         "closed_listings": listing.closed_listings,

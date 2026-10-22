@@ -105,10 +105,12 @@ def test_goods_profile_alerts_only_for_home_city(tmp_path):
     alert = profile.alert(phone(51, 30_000))
     assert alert["price"] == "30 000 ₽"
     assert alert["vs_market"] == "-17%"
+    assert alert["price_assessment"] == "на 17% дешевле медианы"
 
     path = tmp_path / "phones.xlsx"
     profile.write_table(path, seen_before={})
     assert load_workbook(path).sheetnames == ["Рынок", "Объявления"]
+    assert load_workbook(path)["Объявления"]["F1"].value == "Оценка цены"
 
 
 def test_short_page_is_last():
