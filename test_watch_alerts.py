@@ -32,6 +32,34 @@ def item_html(*, total: int, today: int | None) -> str:
     )
 
 
+def test_watch_stops_when_its_search_is_deleted(monkeypatch, tmp_path):
+    monkeypatch.setattr(avito, "SEARCHES_DIR", tmp_path / "searches")
+    monkeypatch.setattr(avito, "DATA_DIR", tmp_path / "data")
+    avito.SEARCHES_DIR.mkdir()
+    config = avito.SEARCHES_DIR / "phones.json"
+    config.write_text(json.dumps({
+        "title": "phones", "profile": "goods", "catalog_url": "https://www.avito.ru/kazan/telefony",
+        "params": {"categoryId": "84", "locationId": "650400"},
+    }), encoding="utf-8")
+    pages = []
+
+    class FakeClient:
+        sessions_opened = 1
+
+        def __init__(self, **kwargs):
+            pass
+
+        def page(self, *, catalog_url, params, number):
+            pages.append(number)
+            return avito_client.Page(number=number, items=(), total_count=0, items_on_page=0)
+
+    monkeypatch.setattr(avito.avito_client, "CalmClient", FakeClient)
+    monkeypatch.setattr(time, "sleep", lambda _: config.unlink())
+    avito.cmd_watch(argparse.Namespace(names=["phones"], interval=60, delay=0, no_telegram=True))
+
+    assert pages == [1]
+
+
 @pytest.fixture
 def watch_cycles(monkeypatch, tmp_path):
     """Run watch over scripted first pages, one list per cycle; return alerted ids."""

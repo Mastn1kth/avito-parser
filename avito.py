@@ -379,6 +379,13 @@ def cmd_watch(args: argparse.Namespace) -> None:
     cycle = 0
     try:
         while True:
+            active = [entry for entry in watched if (SEARCHES_DIR / f"{entry[0].name}.json").exists()]
+            for search, *_ in watched:
+                if not (SEARCHES_DIR / f"{search.name}.json").exists():
+                    say("WATCH-REMOVED", search=search.name)
+            watched = active
+            if not watched:
+                return
             cycle += 1
             for search, base, seen, profile in watched:
                 try:
