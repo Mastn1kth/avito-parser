@@ -8,6 +8,9 @@
 
 from __future__ import annotations
 
+import statistics
+import re
+
 from pathlib import Path
 from typing import Any
 
@@ -147,4 +150,45 @@ class GoodsProfile:
         return {"объявлений": len(offers), "групп с рыночной ценой": len(stats)}
 
 
-PROFILES = {profile.name: profile for profile in (RealtyOwnerProfile, GoodsProfile)}
+class LaptopDealsProfile(GoodsProfile):
+    """Alert on plausible low prices against the current private-laptop sample."""
+
+    name = "laptop-deals"
+    MIN_SAMPLE = 20
+
+    def refresh_market(self) -> None:
+        super().refresh_market()
+        prices = [offer.listing.price for item in self.base.values()
+                  if (offer := goods.offer_from_item(item)).seller == "частное лицо"
+                  and not offer.defect and offer.listing.price]
+        self.laptop_median = round(statistics.median(prices)) if len(prices) >= self.MIN_SAMPLE else None
+
+    def alert(self, item: dict[str, Any]) -> dict[str, Any] | None:
+        fields = super().alert(item)
+        offer = goods.offer_from_item(item)
+        price = offer.listing.price
+        median = self.laptop_median
+        if fields is None or offer.defect or not price or median is None:
+            return None
+        if not 0.5 * median <= price <= 0.85 * median:
+            return None
+        fields["market"] = goods.price_text(median)
+        fields["vs_market"] = f"{price / median - 1:+.0%}"
+        fields["notes"].append("ниже медианы ноутбуков; характеристики проверьте вручную")
+        return fields
+
+
+class MonitorProfile(GoodsProfile):
+    """Keep computer accessories out of monitor alerts."""
+
+    name = "monitors"
+    ACCESSORY = re.compile(r"кабель|кронштейн|подставк|матриц|шлейф|плат[ауы]|блок питания", re.I)
+
+    def alert(self, item: dict[str, Any]) -> dict[str, Any] | None:
+        title = str(item.get("title") or "")
+        if not re.search(r"монитор", title, re.I) or self.ACCESSORY.search(title):
+            return None
+        return super().alert(item)
+
+
+PROFILES = {profile.name: profile for profile in (RealtyOwnerProfile, GoodsProfile, LaptopDealsProfile, MonitorProfile)}

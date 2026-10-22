@@ -44,6 +44,26 @@ def test_all_russia_search_accepts_private_sellers_from_any_city():
     assert profiles.GoodsProfile({}, search.home_city).alert(item) is not None
 
 
+def test_laptop_deals_use_private_sample_median_and_reject_extremes():
+    base = {str(i): phone(i, 10_000, title=f"Ноутбук модель {i}") for i in range(20)}
+    profile = profiles.LaptopDealsProfile(base)
+
+    cheap = profile.alert(phone(21, 8_000, title="Ноутбук рабочий"))
+    assert cheap is not None and cheap["vs_market"] == "-20%"
+    assert profile.alert(phone(22, 4_000, title="Ноутбук рабочий")) is None
+    assert profile.alert(phone(23, 9_000, title="Ноутбук рабочий")) is None
+    assert profile.alert(phone(24, 8_000, title="Ноутбук не работает")) is None
+    assert profiles.LaptopDealsProfile({}).alert(phone(25, 8_000)) is None
+
+
+def test_monitor_alert_ignores_accessories_and_unrelated_titles():
+    profile = profiles.MonitorProfile({})
+
+    assert profile.alert(phone(1, 6_000, title="Монитор 24 дюйма")) is not None
+    assert profile.alert(phone(2, 500, title="Кабель для монитора")) is None
+    assert profile.alert(phone(3, 500, title="Витая пара")) is None
+
+
 def test_market_median_ignores_defects_and_extremes():
     offers = [goods.offer_from_item(phone(i, price)) for i, price in enumerate((34_000, 35_000, 36_000, 37_000))]
     offers.append(goods.offer_from_item(phone(10, 9_000)))  # extreme

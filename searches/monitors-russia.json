@@ -1,0 +1,12 @@
+{
+  "title": "Монитор",
+  "profile": "monitors",
+  "catalog_url": "https://www.avito.ru/rossiya/tovary_dlya_kompyutera?q=%D0%BC%D0%BE%D0%BD%D0%B8%D1%82%D0%BE%D1%80",
+  "params": {
+    "categoryId": "101",
+    "locationId": "660311",
+    "q": "монитор"
+  },
+  "watch_pages": 1,
+  "source_link": "https://www.avito.ru/rossiya/tovary_dlya_kompyutera?q=%D0%BC%D0%BE%D0%BD%D0%B8%D1%82%D0%BE%D1%80"
+}

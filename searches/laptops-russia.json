@@ -1,0 +1,11 @@
+{
+  "title": "Ноутбуки",
+  "profile": "laptop-deals",
+  "catalog_url": "https://www.avito.ru/rossiya/noutbuki",
+  "params": {
+    "categoryId": "98",
+    "locationId": "660311"
+  },
+  "watch_pages": 1,
+  "source_link": "https://www.avito.ru/rossiya/noutbuki"
+}
