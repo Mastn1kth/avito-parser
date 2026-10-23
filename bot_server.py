@@ -16,12 +16,14 @@ import avito
 import bot_jobs
 import bot_outbox
 import presets
+import search_wizard
 import telegram_notify
 
 ROOT = Path(__file__).resolve().parent
 OFFSET_PATH = ROOT / "data" / "bot-offset.txt"
 LOCK_PATH = ROOT / "data" / "bot-server.lock"
 MENU_BUTTONS = {
+    "➕ Добавить поиск": "/new",
     "🔎 Готовые поиски": "/presets",
     "📂 Мои поиски": "/searches",
     "✅ Выбрать для слежения": "/select",
@@ -34,6 +36,7 @@ MENU_BUTTONS = {
 
 def main_keyboard() -> dict:
     return {"keyboard": [
+        [{"text": "➕ Добавить поиск"}],
         [{"text": "🔎 Готовые поиски"}, {"text": "📂 Мои поиски"}],
         [{"text": "✅ Выбрать для слежения"}, {"text": "➕ Добавить ссылку"}],
         [{"text": "📡 Статус"}, {"text": "⏹ Остановить слежение"}],
@@ -84,6 +87,7 @@ class Bot:
         self.selected: set[str] = set()
         self.pending_deletes: dict[str, str] = {}
         self.awaiting_link = False
+        self.wizard = search_wizard.SearchWizard(self)
 
     def send(self, message: str, markup: dict | None = None) -> None:
         payload = {"chat_id": self.chat_id, "text": message[:3900]}
@@ -186,11 +190,16 @@ class Bot:
             self.send(f"{kind}: запущено. Результат пришлю сюда.")
 
     def execute(self, command: str, argument: str = "") -> None:
+        if command in ("/start", "/help", "/add", "/new"):
+            self.wizard.state = None
+            self.awaiting_link = False
         if command in ("/start", "/help"):
             self.awaiting_link = False
             self.send("Управление поисками Авито. Выберите действие кнопкой внизу. "
                       "Свою ссылку можно прислать после кнопки «Добавить ссылку». "
                       "Команды /watch, /scan, /table и /delete тоже работают.", main_keyboard())
+        elif command == "/new":
+            self.wizard.start()
         elif command == "/presets":
             self.show_presets()
         elif command in ("/searches", "/list"):
@@ -258,7 +267,9 @@ class Bot:
             except telegram_notify.TelegramError:
                 logging.warning("Could not acknowledge Telegram button; continuing action")
             action, _, name = str(callback.get("data") or "").partition(":")
-            if action == "preset":
+            if action == "wizard":
+                self.wizard.callback(name)
+            elif action == "preset":
                 preset = presets.get(name)
                 if preset is None:
                     self.send("Шаблон не найден.")
@@ -305,6 +316,9 @@ class Bot:
             return
         if text in MENU_BUTTONS:
             self.execute(MENU_BUTTONS[text])
+            return
+        if self.wizard.state and not text.startswith("/"):
+            self.wizard.text(text)
             return
         if self.awaiting_link and not text.startswith("/"):
             if text.startswith(("https://", "http://")):
