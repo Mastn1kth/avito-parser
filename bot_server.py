@@ -16,6 +16,7 @@ import avito
 import bot_jobs
 import bot_outbox
 import presets
+import iphone_mode
 import search_wizard
 import search_settings
 import telegram_notify
@@ -24,6 +25,7 @@ ROOT = Path(__file__).resolve().parent
 OFFSET_PATH = ROOT / "data" / "bot-offset.txt"
 LOCK_PATH = ROOT / "data" / "bot-server.lock"
 MENU_BUTTONS = {
+    "🚀 Готовые режимы": "/modes",
     "➕ Добавить поиск": "/new",
     "🔎 Готовые поиски": "/presets",
     "📂 Мои поиски": "/searches",
@@ -37,6 +39,7 @@ MENU_BUTTONS = {
 
 def main_keyboard() -> dict:
     return {"keyboard": [
+        [{"text": "🚀 Готовые режимы"}],
         [{"text": "➕ Добавить поиск"}],
         [{"text": "🔎 Готовые поиски"}, {"text": "📂 Мои поиски"}],
         [{"text": "✅ Выбрать для слежения"}, {"text": "➕ Добавить ссылку"}],
@@ -114,6 +117,44 @@ class Bot:
         self.send("Готовые поиски по всей России:",
                   buttons([(p.title, f"preset:{p.name}") for p in presets.PRESETS] +
                           [("🏠 Главное меню", "menu")]))
+
+    def iphone_mode_menu(self):
+        running = self.jobs.watch_running() and self.jobs.watch_names == [iphone_mode.NAME]
+        self.send(iphone_mode.status_text(running), buttons([
+            ("▶ Запустить все iPhone", "iphones:start"),
+            ("📊 Статус обхода", "iphones:status"),
+            ("📋 Проверка моделей", "iphones:coverage"),
+            ("💰 Найденные выгодные", "iphones:deals"),
+            ("Все новые подходящие", "iphones:discount:0"),
+            ("Дешевле на 15%", "iphones:discount:15"),
+            ("Дешевле на 25%", "iphones:discount:25"),
+            ("⏹ Остановить режим", "iphones:stop"),
+            ("🏠 Главное меню", "menu"),
+        ]))
+
+    def iphone_mode_action(self, action):
+        if action == "start":
+            if self.jobs.watch_running() or self.jobs.busy:
+                self.send("Сначала остановите текущее наблюдение и дождитесь долгих операций. Затем запустите режим iPhone.")
+                return
+            if not self.jobs.start_watch([iphone_mode.NAME]):
+                self.send(self.jobs.last_watch_error or "Режим не запустился.")
+                return
+        elif action == "stop":
+            if self.jobs.watch_names == [iphone_mode.NAME]:
+                self.jobs.stop_watch()
+        elif action == "deals":
+            self.send(iphone_mode.deals_text())
+            return
+        elif action == "coverage":
+            self.send(iphone_mode.coverage_text())
+            return
+        elif action.startswith("discount:"):
+            value = action.partition(":")[2]
+            if value not in ("0", "15", "25"):
+                return
+            iphone_mode.set_discount(int(value))
+        self.iphone_mode_menu()
 
     def select_searches(self) -> None:
         names = [path.stem for path in sorted(avito.SEARCHES_DIR.glob("*.json"))]
@@ -228,6 +269,8 @@ class Bot:
                       "Команды /watch, /scan, /table и /delete тоже работают.", main_keyboard())
         elif command == "/new":
             self.wizard.start()
+        elif command == "/modes":
+            self.send("Готовые режимы:", buttons([("📱 Все iPhone · вся Россия", "iphones:status")]))
         elif command == "/presets":
             self.show_presets()
         elif command in ("/searches", "/list"):
@@ -235,6 +278,9 @@ class Bot:
         elif command == "/select":
             self.select_searches()
         elif command == "/status":
+            if self.jobs.watch_names == [iphone_mode.NAME]:
+                self.iphone_mode_menu()
+                return
             running = ", ".join(self.jobs.watch_names) if self.jobs.watch_running() else "не запущено"
             self.send(f"Наблюдение: {running}. Долгие операции: {', '.join(sorted(self.jobs.busy)) or 'нет'}.")
         elif command == "/test":
@@ -295,7 +341,9 @@ class Bot:
             except telegram_notify.TelegramError:
                 logging.warning("Could not acknowledge Telegram button; continuing action")
             action, _, name = str(callback.get("data") or "").partition(":")
-            if action == "wizard":
+            if action == "iphones":
+                self.iphone_mode_action(name)
+            elif action == "wizard":
                 self.wizard.callback(name)
             elif action == "preset":
                 preset = presets.get(name)

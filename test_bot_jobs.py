@@ -70,3 +70,18 @@ def test_watch_selection_resumes_after_server_restart(monkeypatch, tmp_path):
     finally:
         second.stop_watch()
     assert not bot_jobs.WATCH_TARGETS.exists()
+
+
+def test_iphone_mode_launch_and_resume_without_search_files(monkeypatch, tmp_path):
+    (tmp_path / "iphone_mode.py").write_text(
+        'import time\nprint(\'{"event":"WATCH"}\', flush=True)\n'
+        'while True:\n    time.sleep(1)\n', encoding="utf-8")
+    monkeypatch.setattr(bot_jobs, "ROOT", tmp_path)
+    jobs = bot_jobs.Jobs()
+    assert jobs.start_watch(["mode-iphones"])
+    jobs.stop_watch(preserve_selection=True)
+    try:
+        assert jobs.resume_watch()
+        assert jobs.watch_names == ["mode-iphones"]
+    finally:
+        jobs.stop_watch()

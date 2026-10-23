@@ -90,8 +90,10 @@ class Jobs:
             self.watch_log = log_path.open("a", encoding="utf-8")
             flags = subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0
             try:
+                command = ([sys.executable, "iphone_mode.py"] if names == ["mode-iphones"] else
+                           [sys.executable, "avito.py", "--json", "watch", *names])
                 self.watch = subprocess.Popen(
-                    [sys.executable, "avito.py", "--json", "watch", *names], cwd=ROOT,
+                    command, cwd=ROOT,
                     stdout=self.watch_log, stderr=subprocess.STDOUT, creationflags=flags,
                 )
             except OSError:
@@ -161,8 +163,10 @@ class Jobs:
             return False
         if not isinstance(names, list) or not names or not all(
             isinstance(name, str) and re.fullmatch(r"[a-z0-9_-]+", name)
-            and (ROOT / "searches" / f"{name}.json").exists()
+            and (name == "mode-iphones" or (ROOT / "searches" / f"{name}.json").exists())
             for name in names
         ):
+            return False
+        if "mode-iphones" in names and names != ["mode-iphones"]:
             return False
         return self.start_watch(names)
