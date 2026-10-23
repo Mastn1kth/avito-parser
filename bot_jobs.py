@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import signal
 import subprocess
 import sys
@@ -14,6 +15,7 @@ from pathlib import Path
 from typing import Callable
 
 ROOT = Path(__file__).resolve().parent
+WATCH_TARGETS = ROOT / "data" / "bot-watch-targets.json"
 
 
 class Jobs:
@@ -108,6 +110,7 @@ class Jobs:
                 except json.JSONDecodeError:
                     continue
                 if event.get("event") == "WATCH":
+                    WATCH_TARGETS.write_text(json.dumps(names), encoding="utf-8")
                     return True
                 if event.get("event") == "FATAL":
                     self.last_watch_error = str(event.get("error") or "ошибка запуска")
@@ -122,7 +125,9 @@ class Jobs:
         self.stop_watch()
         return False
 
-    def stop_watch(self) -> bool:
+    def stop_watch(self, *, preserve_selection: bool = False) -> bool:
+        if not preserve_selection:
+            WATCH_TARGETS.unlink(missing_ok=True)
         with self.lock:
             if not self.watch_running():
                 self.watch_names = []
@@ -148,3 +153,16 @@ class Jobs:
                     self.watch_log.close()
                     self.watch_log = None
             return True
+
+    def resume_watch(self) -> bool:
+        try:
+            names = json.loads(WATCH_TARGETS.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return False
+        if not isinstance(names, list) or not names or not all(
+            isinstance(name, str) and re.fullmatch(r"[a-z0-9_-]+", name)
+            and (ROOT / "searches" / f"{name}.json").exists()
+            for name in names
+        ):
+            return False
+        return self.start_watch(names)

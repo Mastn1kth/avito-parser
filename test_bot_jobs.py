@@ -42,3 +42,25 @@ def test_finished_watch_is_reported_once():
 
     assert "phones" in jobs.take_stopped_watch()
     assert jobs.take_stopped_watch() is None
+
+
+def test_watch_selection_resumes_after_server_restart(monkeypatch, tmp_path):
+    (tmp_path / "data").mkdir()
+    (tmp_path / "searches").mkdir()
+    (tmp_path / "searches" / "pcs.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "avito.py").write_text(
+        'import time\nprint(\'{"event":"WATCH"}\', flush=True)\n'
+        'while True:\n    time.sleep(1)\n', encoding="utf-8"
+    )
+    monkeypatch.setattr(bot_jobs, "ROOT", tmp_path)
+    monkeypatch.setattr(bot_jobs, "WATCH_TARGETS", tmp_path / "data" / "bot-watch-targets.json")
+    first = bot_jobs.Jobs()
+    assert first.start_watch(["pcs"])
+    first.stop_watch(preserve_selection=True)
+    second = bot_jobs.Jobs()
+    try:
+        assert second.resume_watch()
+        assert second.watch_names == ["pcs"]
+    finally:
+        second.stop_watch()
+    assert not bot_jobs.WATCH_TARGETS.exists()

@@ -327,6 +327,8 @@ def main() -> None:
                         format="%(asctime)s %(levelname)s %(message)s")
     bot = Bot(settings["token"], int(settings["chat_id"]),
               outbox=bot_outbox.Outbox(ROOT / "data" / "bot-outbox.json"))
+    if (ROOT / "data" / "bot-watch-targets.json").exists() and not bot.jobs.resume_watch():
+        logging.error("Could not resume watch: %s", bot.jobs.last_watch_error)
     offset = int(OFFSET_PATH.read_text(encoding="ascii")) if OFFSET_PATH.exists() else 0
     print("Telegram-сервер запущен. Остановить: Ctrl+C", flush=True)
     try:
@@ -351,7 +353,7 @@ def main() -> None:
         print("Telegram-сервер остановлен.", flush=True)
     finally:
         try:
-            bot.jobs.stop_watch()
+            bot.jobs.stop_watch(preserve_selection=True)
         finally:
             lock.close()
 
