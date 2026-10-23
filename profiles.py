@@ -216,6 +216,8 @@ class PCPricesProfile(GoodsProfile):
         ))
 
     def alert(self, item: dict[str, Any]) -> dict[str, Any] | None:
+        if pc_prices.incomplete(item) or self.offer_from_item(item).defect:
+            return None
         fields = super().alert(item)
         if fields is None:
             return None

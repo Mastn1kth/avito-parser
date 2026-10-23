@@ -32,9 +32,9 @@ def test_phone_identity_is_used_in_actual_profile():
 
 
 def test_laptop_all_mode_removes_default_discount_gate():
-    base = {str(i): phone(i, 10000, title="ThinkPad T480") for i in range(5)}
+    base = {str(i): phone(i, 10000, title="ThinkPad T480 i5-8250U 8/256 UHD 620") for i in range(5)}
     profile = profiles.LaptopDealsProfile(base)
-    item = phone(10, 9500, title="ThinkPad T480")
+    item = phone(10, 9500, title="ThinkPad T480 i5-8250U 8/256 UHD 620")
     assert profile.alert(item) is None
     profile.min_discount_pct = 0
     assert profile.alert(item)["market_value"] == 10000

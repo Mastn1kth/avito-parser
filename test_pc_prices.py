@@ -70,3 +70,10 @@ def test_pc_without_stated_gpu_gets_cautious_estimate():
     assert alert["market"] == "4 500 ₽"
     assert alert["price_assessment"].startswith("ориентировочно")
     assert any("видеокарта не указана" in note for note in alert["notes"])
+
+
+def test_incomplete_and_broken_pcs_do_not_alert():
+    profile = profiles.PCPricesProfile({})
+    for description in ("Без процессора", "На запчасти", "Не включается", "Без накопителя"):
+        assert profile.alert(pc(1, 2000, title="Системный блок", description=description)) is None
+    assert profile.alert(pc(2, 7000, title="Системный блок", description="Полностью рабочий")) is not None

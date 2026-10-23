@@ -46,16 +46,16 @@ def test_all_russia_search_accepts_private_sellers_from_any_city():
 
 
 def test_laptop_deals_compare_same_model_and_reject_extremes():
-    base = {str(i): phone(i, 10_000, title="Lenovo ThinkPad T480") for i in range(5)}
+    base = {str(i): phone(i, 10_000, title="Lenovo ThinkPad T480 i5-8250U 8/256 UHD 620") for i in range(5)}
     base.update({str(i): phone(i, 100_000, title="MacBook Air 13 M4 16/256") for i in range(5, 25)})
     profile = profiles.LaptopDealsProfile(base)
 
-    cheap = profile.alert(phone(30, 8_000, title="ThinkPad T480 рабочий"))
+    cheap = profile.alert(phone(30, 8_000, title="ThinkPad T480 i5-8250U 8/256 UHD 620 рабочий"))
     assert cheap is not None and cheap["vs_market"] == "-20%"
-    assert profile.alert(phone(31, 60_000, title="ThinkPad T480")) is None
-    assert profile.alert(phone(32, 4_000, title="ThinkPad T480")) is None
-    assert profile.alert(phone(33, 9_000, title="ThinkPad T480")) is None
-    assert profile.alert(phone(34, 8_000, title="ThinkPad T480 не работает")) is None
+    assert profile.alert(phone(31, 60_000, title="ThinkPad T480 i5-8250U 8/256 UHD 620")) is None
+    assert profile.alert(phone(32, 4_000, title="ThinkPad T480 i5-8250U 8/256 UHD 620")) is None
+    assert profile.alert(phone(33, 9_000, title="ThinkPad T480 i5-8250U 8/256 UHD 620")) is None
+    assert profile.alert(phone(34, 8_000, title="ThinkPad T480 i5-8250U 8/256 UHD 620 не работает")) is None
     assert profile.alert(phone(35, 8_000, title="Ноутбук без модели")) is None
     assert profiles.LaptopDealsProfile({}).alert(phone(36, 8_000)) is None
 

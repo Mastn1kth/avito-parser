@@ -21,6 +21,8 @@ SERIES = re.compile(
     r"\b(thinkpad|ideapad|vivobook|zenbook|latitude|inspiron|pavilion|elitebook|"
     r"probook|aspire|nitro|predator|legion|tuf|rog)\s+([a-z]?\d{3,4}[a-z0-9-]*)\b", re.I
 )
+CPU = re.compile(r"\b(?:core\s+)?(i[3579])[- ]?(\d{4,5}[a-z]{0,2})\b|\b(ryzen\s+[3579])\s+(\d{4}[a-z]{0,2})\b", re.I)
+GRAPHICS = re.compile(r"\b(?:geforce\s+)?((?:rtx|gtx|mx)\s*\d{3,4}(?:\s*ti)?)\b|\b(uhd\s*\d{3}|iris\s+xe|встроенная\s+графика)\b", re.I)
 
 
 def model_key(title: str) -> str | None:
@@ -38,7 +40,12 @@ def model_key(title: str) -> str | None:
         return None
     series = SERIES.search(text)
     if series:
-        return f"{series[1]} {series[2]}"
+        cpu, memory, graphics = CPU.search(text), MEMORY.search(text), GRAPHICS.search(text)
+        if not cpu or not memory or not graphics:
+            return None
+        processor = "".join(part.replace(" ", "") for part in cpu.groups() if part)
+        gpu = re.sub(r"\s+", "", graphics[1] or graphics[2])
+        return f"{series[1]} {series[2]} {processor} {memory[1]}/{memory[2]} {gpu}"
     return None
 
 
