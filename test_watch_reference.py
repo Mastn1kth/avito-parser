@@ -5,11 +5,14 @@ import pytest
 
 import avito
 import avito_client
+import alert_queue
+import telegram_notify
 from test_watch_alerts import listing
 
 
 @pytest.mark.parametrize("reference_fails", [False, True])
-def test_watch_uses_unbounded_reference_without_alerting_reference_items(monkeypatch, tmp_path, reference_fails):
+@pytest.mark.parametrize("delivery_fails", [False, True])
+def test_watch_uses_unbounded_reference_without_alerting_reference_items(monkeypatch, tmp_path, reference_fails, delivery_fails):
     monkeypatch.setattr(avito, "SEARCHES_DIR", tmp_path / "searches")
     monkeypatch.setattr(avito, "DATA_DIR", tmp_path / "data")
     avito.SEARCHES_DIR.mkdir()
@@ -19,6 +22,17 @@ def test_watch_uses_unbounded_reference_without_alerting_reference_items(monkeyp
         "new_only": False,
     }), encoding="utf-8")
     events = []
+    sent = []
+
+    class Notifier:
+        chat_id = 42
+
+        def send(self, text):
+            if delivery_fails:
+                raise telegram_notify.TelegramNetworkError("offline")
+            sent.append(text)
+
+    monkeypatch.setattr(telegram_notify.Notifier, "from_settings", lambda: Notifier())
     reference = []
     for ident, price in enumerate((10000, 12000, 14000), 100):
         item = listing(ident, 10)
@@ -55,7 +69,7 @@ def test_watch_uses_unbounded_reference_without_alerting_reference_items(monkeyp
     monkeypatch.setattr(avito.avito_client, "CalmClient", Client)
     monkeypatch.setattr(avito.time, "sleep", sleep)
     monkeypatch.setattr(avito, "say", lambda event, **fields: events.append({"event": event, **fields}))
-    avito.cmd_watch(argparse.Namespace(names=["phones"], interval=60, delay=0, no_telegram=True))
+    avito.cmd_watch(argparse.Namespace(names=["phones"], interval=60, delay=0, no_telegram=False))
     alerts = [e for e in events if e["event"] == "ALERT"]
     if reference_fails:
         assert alerts == []
@@ -66,3 +80,10 @@ def test_watch_uses_unbounded_reference_without_alerting_reference_items(monkeyp
         assert alerts[0]["discount_percent"] == 25
     seen = json.loads((avito.DATA_DIR / "phones" / "seen.json").read_text(encoding="utf-8"))
     assert set(seen) == {"2"}
+    queue = alert_queue.AlertQueue(avito.DATA_DIR / "phones" / "pending-alerts.sqlite3")
+    assert queue.pending_count() == int(delivery_fails and not reference_fails)
+    delivery_fails = False
+    queue.drain(Notifier())
+    assert len(sent) == (0 if reference_fails else 1)
+    assert queue.pending_count() == 0
+    queue.close()

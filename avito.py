@@ -33,6 +33,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 import apartments
+import alert_queue
 import avito_client
 import item_page
 import link_resolver
@@ -403,7 +404,11 @@ def cmd_watch(args: argparse.Namespace) -> None:
     except RuntimeError as exc:
         fail(str(exc))
     cycle = 0
+    queues = {}
     try:
+        if notifier is not None:
+            for search in searches:
+                queues[search.name] = alert_queue.AlertQueue(search.path("pending-alerts.sqlite3"))
         say("WATCH", searches=[s.name for s in searches], interval_s=args.interval, telegram=notifier is not None)
         while True:
             active = [entry for entry in watched if (SEARCHES_DIR / f"{entry[0].name}.json").exists()]
@@ -415,6 +420,13 @@ def cmd_watch(args: argparse.Namespace) -> None:
                 return
             cycle += 1
             for search, base, seen, profile in watched:
+                delivery_available = True
+                if notifier is not None:
+                    try:
+                        queues[search.name].drain(notifier)
+                    except telegram_notify.TelegramError as exc:
+                        delivery_available = False
+                        say("TELEGRAM-ERROR", search=search.name, error=str(exc))
                 try:
                     changed = False
                     # The first pass only remembers what is already listed:
@@ -449,9 +461,14 @@ def cmd_watch(args: argparse.Namespace) -> None:
                                 handle.write(json.dumps({"found": stamp, **fields}, ensure_ascii=False) + "\n")
                             say("ALERT", **fields)
                             if notifier is not None:
+                                queues[search.name].enqueue(
+                                    key, notifier.chat_id,
+                                    telegram_notify.message_for(search.profile, search.name, fields))
                                 try:
-                                    notifier.send(telegram_notify.message_for(search.profile, search.name, fields))
+                                    if delivery_available:
+                                        queues[search.name].drain(notifier)
                                 except telegram_notify.TelegramError as exc:
+                                    delivery_available = False
                                     say("TELEGRAM-ERROR", error=str(exc))
                     if changed:
                         search.save("listings.json", base)
@@ -475,6 +492,8 @@ def cmd_watch(args: argparse.Namespace) -> None:
         if not JSON_OUTPUT:
             print("\nОстановлено. Новые объявления сохранены; следующий watch продолжит с этого места.")
     finally:
+        for queue in queues.values():
+            queue.close()
         lock_context.__exit__(None, None, None)
 
 
