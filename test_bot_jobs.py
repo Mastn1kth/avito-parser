@@ -1,4 +1,10 @@
 import bot_jobs
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def isolate_watch_targets(monkeypatch, tmp_path):
+    monkeypatch.setattr(bot_jobs, "WATCH_TARGETS", tmp_path / "bot-watch-targets.json")
 
 
 def test_watch_job_reports_immediate_failure(monkeypatch, tmp_path):
