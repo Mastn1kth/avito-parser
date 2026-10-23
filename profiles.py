@@ -16,6 +16,7 @@ from typing import Any
 import apartments
 import goods
 import laptop_prices
+import pc_prices
 
 
 # --- realty-owner -----------------------------------------------------------
@@ -121,14 +122,17 @@ class GoodsProfile:
         self.alert_sellers = alert_sellers
         self.refresh_market()
 
+    def offer_from_item(self, item: dict[str, Any]) -> goods.Offer:
+        return goods.offer_from_item(item)
+
     def refresh_market(self) -> None:
-        offers = [goods.offer_from_item(item) for item in self.base.values()]
+        offers = [self.offer_from_item(item) for item in self.base.values()]
         self.stats = goods.market_stats(goods.market_sample(
             offers, private_only=self.alert_sellers == "private"
         ))
 
     def alert(self, item: dict[str, Any]) -> dict[str, Any] | None:
-        offer = goods.offer_from_item(item)
+        offer = self.offer_from_item(item)
         # Listings from other cities come with delivery and flood the feed;
         # they stay in the table but do not alert.
         if self.home_city and offer.city and offer.city != self.home_city:
@@ -144,7 +148,7 @@ class GoodsProfile:
         return goods.alert_fields(offer)
 
     def write_table(self, path: Path, seen_before: dict[str, str]) -> dict[str, int]:
-        offers = [goods.offer_from_item(item) for item in self.base.values()]
+        offers = [self.offer_from_item(item) for item in self.base.values()]
         stats = goods.market_stats(goods.market_sample(
             offers, private_only=self.alert_sellers == "private"
         ))
@@ -192,6 +196,48 @@ class LaptopDealsProfile(GoodsProfile):
         return fields
 
 
+class PCPricesProfile(GoodsProfile):
+    """Compare only desktop PCs with stated, matching core components."""
+
+    name = "pc-prices"
+
+    def offer_from_item(self, item: dict[str, Any]) -> goods.Offer:
+        return pc_prices.offer_from_item(item)
+
+    def refresh_market(self) -> None:
+        offers = [self.offer_from_item(item) for item in self.base.values()]
+        comparable = [offer for offer in offers if offer.group not in
+                      ("Недостаточно характеристик", "Некомплектный/неисправный ПК")]
+        self.stats = goods.market_stats(goods.market_sample(
+            comparable, private_only=self.alert_sellers == "private"
+        ))
+
+    def alert(self, item: dict[str, Any]) -> dict[str, Any] | None:
+        fields = super().alert(item)
+        if fields is None:
+            return None
+        if not fields["vs_market"]:
+            fields["notes"].append("цена не оценена: мало сопоставимых ПК или не указаны характеристики")
+        elif "видеокарта не указана" in (pc_prices.group_key(item) or ""):
+            fields["price_assessment"] = "ориентировочно " + fields["price_assessment"]
+            fields["notes"] = ["ниже медианы группы" if note == "дешевле рынка" else note
+                               for note in fields["notes"]]
+            fields["notes"].append("видеокарта не указана; её наличие и цена могут изменить оценку")
+        return fields
+
+    def write_table(self, path: Path, seen_before: dict[str, str]) -> dict[str, int]:
+        offers = [self.offer_from_item(item) for item in self.base.values()]
+        goods.annotate(offers, self.stats, self.home_city)
+        for offer in offers:
+            offer.listing.is_new = str(offer.listing.id) not in seen_before
+            if offer.vs_market is not None and "видеокарта не указана" in offer.group:
+                offer.notes = ["ниже медианы группы" if note == "дешевле рынка" else note
+                               for note in offer.notes]
+                offer.notes.append("ориентир: видеокарта не указана")
+        goods.write_workbook(path, offers, self.stats)
+        return {"объявлений": len(offers), "групп с рыночной ценой": len(self.stats)}
+
+
 class MonitorProfile(GoodsProfile):
     """Keep computer accessories out of monitor alerts."""
 
@@ -205,4 +251,6 @@ class MonitorProfile(GoodsProfile):
         return super().alert(item)
 
 
-PROFILES = {profile.name: profile for profile in (RealtyOwnerProfile, GoodsProfile, LaptopDealsProfile, MonitorProfile)}
+PROFILES = {profile.name: profile for profile in (
+    RealtyOwnerProfile, GoodsProfile, LaptopDealsProfile, PCPricesProfile, MonitorProfile
+)}
