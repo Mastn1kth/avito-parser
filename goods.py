@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 import apartments
+import iphone_identity
 
 MEMORY_PATTERN = re.compile(r"^\d+\s*(?:ГБ|ТБ|GB|TB)$", re.IGNORECASE)
 # Prices outside [LOW, HIGH] x raw median are left out of the market price.
@@ -49,6 +50,8 @@ class Offer:
     defect: bool = False
     market: int | None = None
     vs_market: float | None = None
+    reference_count: int = 0
+    comparable: bool = True
     notes: list[str] = field(default_factory=list)
 
     @property
@@ -61,6 +64,12 @@ def offer_from_item(item: dict[str, Any]) -> Offer:
     parts = [part.strip() for part in listing.title.split(",") if part.strip()]
     model = parts[0] if parts else listing.title
     memory = next((part for part in parts[1:] if MEMORY_PATTERN.match(part)), "")
+    comparable = True
+    if re.search(r"iphone|айфон", listing.title, re.I):
+        identity = iphone_identity.group_key(listing.title)
+        comparable = identity is not None
+        if identity:
+            model, memory = identity.split(" · ")
     badges = listing.avito_badges
     price_badge = next(
         (badge for badge in badges if "рыночн" in badge.lower()),
@@ -70,6 +79,7 @@ def offer_from_item(item: dict[str, Any]) -> Offer:
         listing=listing,
         model=model,
         memory=memory,
+        comparable=comparable,
         seller=listing.seller_label or "частное лицо",
         delivery_only="Только доставка" in badges,
         avito_price_badge=price_badge,
@@ -93,7 +103,7 @@ class GroupStats:
 def market_stats(offers: list[Offer]) -> dict[str, GroupStats]:
     groups: dict[str, list[int]] = {}
     for offer in offers:
-        if offer.listing.price and not offer.defect:
+        if offer.listing.price and not offer.defect and offer.comparable:
             groups.setdefault(offer.group, []).append(offer.listing.price)
     result = {}
     for group, prices in groups.items():
@@ -136,9 +146,13 @@ def annotate(
     for offer in offers:
         group = stats.get(offer.group)
         offer.notes = []
-        if group and offer.listing.price:
+        offer.market = None
+        offer.vs_market = None
+        offer.reference_count = 0
+        if group and offer.listing.price and offer.comparable:
             offer.market = group.median
             offer.vs_market = offer.listing.price / group.median - 1
+            offer.reference_count = group.used
             if offer.defect:
                 offer.notes.append("заблокирован/неисправен (по описанию)")
             elif offer.listing.price < OUTLIER_LOW * group.median:
@@ -247,6 +261,11 @@ def alert_fields(offer: Offer) -> dict[str, Any]:
         "title": listing.title,
         "price": price_text(listing.price),
         "market": price_text(offer.market),
+        "price_value": listing.price,
+        "market_value": offer.market,
+        "discount_percent": (1 - listing.price / offer.market) * 100 if listing.price and offer.market else None,
+        "reference_count": offer.reference_count,
+        "defective": offer.defect,
         "vs_market": f"{offer.vs_market:+.0%}" if offer.vs_market is not None else "",
         "price_assessment": price_comparison(offer.vs_market),
         "avito_badge": offer.avito_price_badge,
