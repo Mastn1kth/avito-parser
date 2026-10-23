@@ -12,6 +12,13 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
+
+@pytest.fixture(autouse=True)
+def separate_reference_requests(monkeypatch):
+    import market_reference
+    # Measure the watch loop separately from the cached market sampling startup.
+    monkeypatch.setattr(market_reference, "refresh", lambda client, search: {})
+
 import avito
 import avito_client
 import main

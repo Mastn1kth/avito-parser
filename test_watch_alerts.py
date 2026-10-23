@@ -12,6 +12,12 @@ import avito_client
 import telegram_notify
 
 
+@pytest.fixture(autouse=True)
+def separate_reference_requests(monkeypatch):
+    # These scenarios script watch pages; reference collection has dedicated integration tests.
+    monkeypatch.setattr(avito.market_reference, "refresh", lambda client, search: {})
+
+
 def listing(item_id: int, minutes_ago: float, *, seller: str | None = None) -> dict:
     stamp = (datetime.now() - timedelta(minutes=minutes_ago)).timestamp() * 1000
     item = {

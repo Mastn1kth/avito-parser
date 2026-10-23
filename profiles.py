@@ -163,6 +163,7 @@ class LaptopDealsProfile(GoodsProfile):
     """Alert only when enough comparable private listings exist."""
 
     name = "laptop-deals"
+    min_discount_pct = 15
 
     def refresh_market(self) -> None:
         offers = [goods.offer_from_item(item) for item in self.base.values()]
@@ -183,12 +184,14 @@ class LaptopDealsProfile(GoodsProfile):
         if offer.defect or not price or reference is None:
             return None
         median = reference.median
-        if not 0.5 * median <= price <= 0.85 * median:
+        if price < 0.5 * median or (self.min_discount_pct and price > (1 - self.min_discount_pct / 100) * median):
             return None
         fields = goods.alert_fields(offer)
         fields["market"] = goods.price_text(median)
         fields["vs_market"] = f"{price / median - 1:+.0%}"
         fields["price_assessment"] = goods.price_comparison(price / median - 1)
+        fields.update(price_value=price, market_value=median,
+                      discount_percent=(1 - price / median) * 100, reference_count=reference.count)
         fields["notes"].append(
             f"медиана: {reference.source}, {reference.count} объявлений; "
             "состояние и характеристики проверьте вручную"

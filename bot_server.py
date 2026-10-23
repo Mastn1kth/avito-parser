@@ -17,6 +17,7 @@ import bot_jobs
 import bot_outbox
 import presets
 import search_wizard
+import search_settings
 import telegram_notify
 
 ROOT = Path(__file__).resolve().parent
@@ -141,8 +142,35 @@ class Bot:
         self.send(f"{title}\nИмя: {name}", buttons([
             ("▶ Следить", f"watch:{name}"), ("⟳ Собрать", f"scan:{name}"),
             ("📊 Таблица Excel", f"table:{name}"), ("🗑 Удалить", f"delete:{name}"),
+            ("⚙️ Уведомления", f"alerts:{name}"),
             ("📂 Мои поиски", "searches"),
         ]))
+
+    def notification_settings(self, name: str, percent: int | None = None) -> None:
+        try:
+            if percent is not None:
+                if name in self.jobs.watch_names and self.jobs.watch_running():
+                    self.send("Сначала остановите наблюдение через /stop, измените настройки и запустите его снова.")
+                    return
+                if self.jobs.busy:
+                    self.send("Дождитесь завершения долгих операций, затем измените уведомления.")
+                    return
+                search_settings.set_discount(avito.SEARCHES_DIR, name, percent)
+            config = search_settings.load(avito.SEARCHES_DIR, name)
+        except (OSError, ValueError) as exc:
+            self.send(f"Не удалось открыть настройки: {exc}")
+            return
+        current = config.get("min_discount_pct")
+        label = ("по правилам категории" if current is None else
+                 "все подходящие объявления" if current == 0 else f"дешевле медианы на {current}%")
+        self.send(f"Уведомления: {config.get('title') or name}\nСейчас: {label}.\n"
+                  "При пороге 15% или 25% объявления без надёжной оценки цены не присылаются.\n"
+                  "Выбор «Все» сохраняет фильтры категории и состояния товара.", buttons([
+                      ("Все подходящие", f"discount:0:{name}"),
+                      ("Дешевле медианы на 15%", f"discount:15:{name}"),
+                      ("Дешевле медианы на 25%", f"discount:25:{name}"),
+                      ("Назад к поиску", f"search:{name}"),
+                  ]))
 
     @staticmethod
     def search_title(path: Path) -> str | None:
@@ -277,6 +305,14 @@ class Bot:
                     self.send("Этот поиск уже есть в «Мои поиски».")
                 else:
                     self.start_job("add", ["add", "--name", name, "--profile", preset.profile, preset.url], "Добавление")
+            elif action == "alerts":
+                self.notification_settings(name)
+            elif action == "discount":
+                percent, _, target = name.partition(":")
+                if percent in ("0", "15", "25"):
+                    self.notification_settings(target, int(percent))
+                else:
+                    self.send("Неверный порог уведомлений.")
             elif action == "search":
                 self.search_actions(name)
             elif action == "searches":

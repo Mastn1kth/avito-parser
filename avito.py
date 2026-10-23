@@ -36,6 +36,7 @@ import apartments
 import avito_client
 import item_page
 import link_resolver
+import market_reference
 import profiles
 import telegram_notify
 import watch_lock
@@ -142,6 +143,7 @@ class Search:
     fresh_hours: float = DEFAULT_FRESH_HOURS
     alert_sellers: str = "private"
     new_only: bool = True
+    min_discount_pct: int | None = None
 
     @property
     def dir(self) -> Path:
@@ -183,6 +185,9 @@ def load_search(name: str) -> Search:
         fail(f"Нет поиска «{name}». Есть: {known}. Новый: avito.py add \"<ссылка>\"")
     if config.get("profile") not in profiles.PROFILES:
         fail(f"{path}: неизвестный profile «{config.get('profile')}»")
+    threshold = config.get("min_discount_pct")
+    if threshold is not None and (type(threshold) is not int or threshold not in (0, 15, 25)):
+        fail(f"{path}: min_discount_pct должен быть 0, 15 или 25")
     return Search(
         name=name,
         title=config.get("title", name),
@@ -193,6 +198,7 @@ def load_search(name: str) -> Search:
         fresh_hours=float(config.get("fresh_hours", DEFAULT_FRESH_HOURS)),
         alert_sellers=str(config.get("alert_sellers", "private")),
         new_only=bool(config.get("new_only", True)),
+        min_discount_pct=config.get("min_discount_pct"),
     )
 
 
@@ -359,6 +365,18 @@ def cmd_scan(args: argparse.Namespace) -> None:
     write_table(search, seen_before)
 
 
+def discount_matches(fields: dict[str, Any], threshold: int | None) -> bool:
+    """Compare numeric prices, never rounded text; unknown prices cannot be deals."""
+    if threshold in (None, 0):
+        return True
+    if type(threshold) is not int or not 0 < threshold < 100:
+        return False
+    price, median = fields.get("price_value"), fields.get("market_value")
+    return (not fields.get("defective") and isinstance(price, (int, float))
+            and isinstance(median, (int, float)) and price > 0 and median > 0
+            and price * 100 <= median * (100 - threshold))
+
+
 def cmd_watch(args: argparse.Namespace) -> None:
     """Read the first pages of every search in turn; alert on unseen listings."""
     searches = [load_search(name) for name in args.names]
@@ -373,8 +391,11 @@ def cmd_watch(args: argparse.Namespace) -> None:
     primed: set[str] = set()
     for search in searches:
         base = search.load("listings.json")
+        profile = profiles.PROFILES[search.profile]({}, search.home_city, search.alert_sellers)
+        if search.min_discount_pct is not None:
+            profile.min_discount_pct = search.min_discount_pct
         watched.append((search, base, search.load("seen.json"),
-                        profiles.PROFILES[search.profile](base, search.home_city, search.alert_sellers)))
+                        profile))
         search.dir.mkdir(parents=True, exist_ok=True)
     lock_context = watch_lock.watch_locks(DATA_DIR, [s.name for s in searches])
     try:
@@ -417,7 +438,7 @@ def cmd_watch(args: argparse.Namespace) -> None:
                             if not is_fresh(listed_at, search.fresh_hours):
                                 continue
                             fields = profile.alert(item)
-                            if fields is None:
+                            if fields is None or not discount_matches(fields, search.min_discount_pct):
                                 continue
                             fields = {"search": search.name, **fields}
                             if search.new_only and not check_newly_created(client, search, fields):
@@ -440,7 +461,12 @@ def cmd_watch(args: argparse.Namespace) -> None:
                         say("PRIMED", search=search.name, remembered=remembered)
                 except (RuntimeError, ValueError, *avito_client.TRANSPORT_ERRORS) as exc:
                     say("ERROR", search=search.name, error=f"{type(exc).__name__}: {exc}"[:300])
-                if cycle % MARKET_REFRESH_EVERY_CYCLES == 0 and hasattr(profile, "refresh_market"):
+                if (cycle == 1 or cycle % MARKET_REFRESH_EVERY_CYCLES == 0) and hasattr(profile, "refresh_market"):
+                    try:
+                        profile.base = market_reference.refresh(client, search)
+                    except (RuntimeError, ValueError, OSError, *avito_client.TRANSPORT_ERRORS) as exc:
+                        profile.base = {}
+                        say("ERROR", search=search.name, error=f"Выборка цен недоступна: {type(exc).__name__}")
                     profile.refresh_market()
             if cycle % HEARTBEAT_EVERY_CYCLES == 0:
                 say("HEARTBEAT", cycle=cycle, sessions=client.sessions_opened)
