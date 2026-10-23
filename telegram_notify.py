@@ -107,7 +107,7 @@ def _call_once(token: str, method: str, payload: dict[str, Any] | None) -> Any:
         except (ValueError, OSError):
             description = None
         raise TelegramError(f"Telegram ответил {exc.code}: {description or exc.reason}") from None
-    except (urllib.error.URLError, TimeoutError) as exc:
+    except (urllib.error.URLError, OSError) as exc:
         raise TelegramNetworkError(f"нет связи с Telegram: {exc}") from None
     if not answer.get("ok"):
         raise TelegramError(f"Telegram: {answer.get('description')}")
@@ -169,13 +169,13 @@ def realty_message(search_title: str, alert: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def goods_message(search_title: str, alert: dict[str, Any]) -> str:
+def goods_message(search_title: str, alert: dict[str, Any], icon: str = "📱") -> str:
     market = ""
     if alert.get("vs_market"):
         assessment = alert.get("price_assessment") or alert["vs_market"]
         market = f" · медиана {esc(alert['market'])}, {esc(assessment)}"
     lines = [
-        f"📱 <b>{esc(alert['title'])}</b>",
+        f"{icon} <b>{esc(alert['title'])}</b>",
         f"💰 <b>{esc(alert['price'])}</b>{market}",
     ]
     if alert.get("listed_at"):
@@ -198,4 +198,5 @@ def goods_message(search_title: str, alert: dict[str, Any]) -> str:
 def message_for(profile: str, search_title: str, alert: dict[str, Any]) -> str:
     if profile == "realty-owner":
         return realty_message(search_title, alert)
-    return goods_message(search_title, alert)
+    icon = {"pc-prices": "🖥️", "laptop-deals": "💻", "monitors": "🖥️"}.get(profile, "📱")
+    return goods_message(search_title, alert, icon)
