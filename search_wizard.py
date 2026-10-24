@@ -23,7 +23,9 @@ class SearchWizard:
 
     def start(self):
         self.state = {"step": "category", "nonce": secrets.token_hex(6)}
-        self.send("Выберите категорию:", [(v[0], "wizard:" + k) for k, v in CATEGORIES.items()])
+        self.send("Выберите категорию или добавьте поиск по ссылке:",
+                  [(v[0], "wizard:" + k) for k, v in CATEGORIES.items()] +
+                  [("🔗 По ссылке", "wizard:link")])
 
     def callback(self, value):
         if value == "cancel":
@@ -33,6 +35,10 @@ class SearchWizard:
         state = self.state
         if not state:
             self.bot.send("Этот шаг устарел. Нажмите «Добавить поиск».")
+            return
+        if value == "link" and state["step"] == "category":
+            self.state = None
+            self.bot.execute("/add")
             return
         if state["step"] == "category" and value in CATEGORIES:
             state.update(category=value, step="query")

@@ -110,17 +110,68 @@ def test_main_keyboard_add_link_and_cancel(monkeypatch):
 
     say("/start")
     keyboard = sent[-1][1]["reply_markup"]["keyboard"]
-    assert any(button["text"] == "➕ Добавить ссылку" for row in keyboard for button in row)
-    say("➕ Добавить ссылку")
+    assert any(button["text"] == "➕ Добавить поиск" for row in keyboard for button in row)
+    say("➕ Добавить поиск")
+    bot.handle({"callback_query": {"id": "link", "from": {"id": 42},
+                                   "message": {"chat": {"id": 42}}, "data": "wizard:link"}})
     assert bot.awaiting_link
     say("не ссылка")
     assert jobs.started == []
     say("🏠 Главное меню")
     assert not bot.awaiting_link
+    # Text from an older Telegram keyboard still works after the menu update.
     say("➕ Добавить ссылку")
     say("https://www.avito.ru/rossiya/telefony?q=айфон")
     assert jobs.started[0][0] == "add"
     assert "%D0%B0" in jobs.started[0][1][-1]
+
+
+def test_compact_keyboard_keeps_search_and_watch_actions_reachable(monkeypatch, tmp_path):
+    sent = []
+    monkeypatch.setattr(telegram_notify, "call", lambda token, method, payload=None: sent.append((method, payload)))
+    monkeypatch.setattr(avito, "SEARCHES_DIR", tmp_path)
+    (tmp_path / "phones.json").write_text(json.dumps({
+        "title": "phones", "profile": "goods",
+        "catalog_url": "https://www.avito.ru/rossiya/telefony",
+        "params": {"categoryId": "84", "locationId": "660311"},
+    }), encoding="utf-8")
+    bot = bot_server.Bot("123:abc", 42, FakeJobs())
+
+    def click(action):
+        bot.handle({"callback_query": {"id": action, "from": {"id": 42},
+                                       "message": {"chat": {"id": 42}}, "data": action}})
+
+    bot.execute("/start")
+    labels = [button["text"] for row in sent[-1][1]["reply_markup"]["keyboard"] for button in row]
+    assert labels == ["🚀 Готовые режимы", "📂 Мои поиски", "➕ Добавить поиск",
+                      "📡 Наблюдение", "🏠 Главное меню"]
+
+    bot.handle({"message": {"chat": {"id": 42}, "text": "📂 Мои поиски"}})
+    actions = [row[0]["callback_data"] for row in sent[-1][1]["reply_markup"]["inline_keyboard"]]
+    assert {"search:phones", "select", "presets"}.issubset(actions)
+    click("presets")
+    assert "Готовые поиски" in sent[-1][1]["text"]
+    click("select")
+    assert "Выберите поиски" in sent[-1][1]["text"]
+
+    bot.handle({"message": {"chat": {"id": 42}, "text": "➕ Добавить поиск"}})
+    actions = [row[0]["callback_data"] for row in sent[-1][1]["reply_markup"]["inline_keyboard"]]
+    assert "wizard:link" in actions
+    click("wizard:link")
+    assert bot.awaiting_link and bot.wizard.state is None
+
+    bot.handle({"message": {"chat": {"id": 42}, "text": "📡 Наблюдение"}})
+    assert not bot.awaiting_link
+    actions = [row[0]["callback_data"] for row in sent[-1][1]["reply_markup"]["inline_keyboard"]]
+    assert {"select", "searches"}.issubset(actions)
+    assert "stop" not in actions
+    bot.jobs.watch_names = ["phones"]
+    bot.jobs.watch_running = lambda: True
+    bot.execute("/status")
+    actions = [row[0]["callback_data"] for row in sent[-1][1]["reply_markup"]["inline_keyboard"]]
+    assert "stop" in actions
+    click("stop")
+    assert "Наблюдение не запущено" in sent[-1][1]["text"]
 
 
 def test_second_bot_server_cannot_take_lock(monkeypatch, tmp_path):

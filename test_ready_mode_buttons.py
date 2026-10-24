@@ -23,6 +23,11 @@ def test_ready_modes_button_budget_discount_and_start(monkeypatch, tmp_path):
     message("🚀 Готовые режимы")
     options = [row[0]["callback_data"] for row in sent[-1][1]["reply_markup"]["inline_keyboard"]]
     assert {"ready:pc:status", "ready:laptop:status"}.issubset(options)
+    click("ready:pc:status")
+    options = [row[0]["callback_data"] for row in sent[-1][1]["reply_markup"]["inline_keyboard"]]
+    assert "ready:pc:start" in options
+    assert "ready:pc:stop" not in options
+    assert "ready:pc:status" not in options
     click("ready:pc:budget")
     message("9000", chat=7)
     assert computer_mode.settings()["max_price"] == 0
@@ -39,6 +44,12 @@ def test_ready_modes_button_budget_discount_and_start(monkeypatch, tmp_path):
     assert jobs.started == []
     click("ready:pc:start")
     assert jobs.started == [("watch", [computer_mode.NAME])]
+    jobs.watch_names = [computer_mode.NAME]
+    jobs.watch_running = lambda: True
+    click("ready:pc:status")
+    options = [row[0]["callback_data"] for row in sent[-1][1]["reply_markup"]["inline_keyboard"]]
+    assert "ready:pc:stop" in options
+    assert "ready:pc:start" not in options
 
 
 def test_ready_mode_start_preserves_existing_watch(monkeypatch, tmp_path):

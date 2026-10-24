@@ -34,6 +34,7 @@ MENU_BUTTONS = {
     "✅ Выбрать для слежения": "/select",
     "➕ Добавить ссылку": "/add",
     "📡 Статус": "/status",
+    "📡 Наблюдение": "/status",
     "⏹ Остановить слежение": "/stop",
     "🏠 Главное меню": "/start",
 }
@@ -41,11 +42,8 @@ MENU_BUTTONS = {
 
 def main_keyboard() -> dict:
     return {"keyboard": [
-        [{"text": "🚀 Готовые режимы"}],
-        [{"text": "➕ Добавить поиск"}],
-        [{"text": "🔎 Готовые поиски"}, {"text": "📂 Мои поиски"}],
-        [{"text": "✅ Выбрать для слежения"}, {"text": "➕ Добавить ссылку"}],
-        [{"text": "📡 Статус"}, {"text": "⏹ Остановить слежение"}],
+        [{"text": "🚀 Готовые режимы"}, {"text": "📂 Мои поиски"}],
+        [{"text": "➕ Добавить поиск"}, {"text": "📡 Наблюдение"}],
         [{"text": "🏠 Главное меню"}],
     ], "resize_keyboard": True, "is_persistent": True}
 
@@ -109,12 +107,17 @@ class Bot:
     def searches(self) -> None:
         items = sorted(avito.SEARCHES_DIR.glob("*.json"))
         if not items:
-            self.send("Поисков пока нет. Откройте /presets или отправьте /add <ссылка Авито>.")
+            self.send("Поисков пока нет. Добавьте готовый поиск или создайте свой.", buttons([
+                ("🔎 Готовые поиски", "presets"), ("➕ Добавить поиск", "new"),
+                ("🏠 Главное меню", "menu"),
+            ]))
             return
         rows = [(self.search_title(path) or f"⚠️ {path.stem} (ошибка файла)",
                  f"search:{path.stem}") for path in items]
+        rows.extend([("✅ Выбрать несколько", "select"),
+                     ("🔎 Готовые поиски", "presets")])
         rows.append(("🏠 Главное меню", "menu"))
-        self.send("Мои поиски. Выберите один или запустите /watch имя1 имя2:", buttons(rows))
+        self.send("Мои поиски. Выберите поиск или действие:", buttons(rows))
 
     def show_presets(self) -> None:
         self.send("Готовые поиски по всей России:",
@@ -123,16 +126,16 @@ class Bot:
 
     def iphone_mode_menu(self):
         running = self.jobs.watch_running() and self.jobs.watch_names == [iphone_mode.NAME]
+        action = (("⏹ Остановить режим", "iphones:stop") if running else
+                  ("▶ Запустить все iPhone", "iphones:start"))
         self.send(iphone_mode.status_text(running), buttons([
-            ("▶ Запустить все iPhone", "iphones:start"),
-            ("📊 Статус обхода", "iphones:status"),
+            action,
             ("📋 Проверка моделей", "iphones:coverage"),
             ("💰 Найденные выгодные", "iphones:deals"),
             ("Все новые подходящие", "iphones:discount:0"),
             ("Дешевле на 15%", "iphones:discount:15"),
             ("Дешевле на 25%", "iphones:discount:25"),
-            ("⏹ Остановить режим", "iphones:stop"),
-            ("🏠 Главное меню", "menu"),
+            ("🚀 Готовые режимы", "modes"),
         ]))
 
     def iphone_mode_action(self, action):
@@ -162,15 +165,15 @@ class Bot:
     def ready_mode_menu(self, kind):
         module = {"pc": computer_mode, "laptop": laptop_mode}[kind]
         running = self.jobs.watch_running() and self.jobs.watch_names == [module.NAME]
+        action = (("⏹ Остановить режим", f"ready:{kind}:stop") if running else
+                  ("▶ Запустить режим", f"ready:{kind}:start"))
         self.send(module.status_text(running), buttons([
-            ("▶ Запустить режим", f"ready:{kind}:start"),
-            ("📊 Статус", f"ready:{kind}:status"),
+            action,
             ("💰 Найденные предложения", f"ready:{kind}:deals"),
             ("💵 Лимит цены", f"ready:{kind}:budget"),
             ("Все подходящие", f"ready:{kind}:discount:0"),
             ("Дешевле на 15%", f"ready:{kind}:discount:15"),
             ("Дешевле на 25%", f"ready:{kind}:discount:25"),
-            ("⏹ Остановить режим", f"ready:{kind}:stop"),
             ("🚀 Готовые режимы", "modes"),
         ]))
 
@@ -309,7 +312,8 @@ class Bot:
             self.send(f"{kind}: запущено. Результат пришлю сюда.")
 
     def execute(self, command: str, argument: str = "") -> None:
-        if command in ("/start", "/help", "/add", "/new"):
+        if command in ("/start", "/help", "/add", "/new", "/modes", "/presets",
+                       "/searches", "/list", "/select", "/status", "/stop"):
             self.wizard.state = None
             self.awaiting_link = False
             self.awaiting_mode_budget = None
@@ -341,7 +345,11 @@ class Bot:
                     self.ready_mode_menu(kind)
                     return
             running = ", ".join(self.jobs.watch_names) if self.jobs.watch_running() else "не запущено"
-            self.send(f"Наблюдение: {running}. Долгие операции: {', '.join(sorted(self.jobs.busy)) or 'нет'}.")
+            rows = [("✅ Выбрать несколько", "select"), ("📂 Мои поиски", "searches")]
+            if self.jobs.watch_running():
+                rows.insert(0, ("⏹ Остановить слежение", "stop"))
+            self.send(f"Наблюдение: {running}. Долгие операции: {', '.join(sorted(self.jobs.busy)) or 'нет'}.",
+                      buttons(rows))
         elif command == "/test":
             self.send("✅ Telegram-бот отвечает.")
         elif command == "/stop":
@@ -406,6 +414,8 @@ class Bot:
                 self.ready_mode_action(name)
             elif action == "modes":
                 self.execute("/modes")
+            elif action in ("presets", "new", "select", "stop"):
+                self.execute("/" + action)
             elif action == "wizard":
                 self.wizard.callback(name)
             elif action == "preset":
