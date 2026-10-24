@@ -109,6 +109,10 @@ def _call_once(token: str, method: str, payload: dict[str, Any] | None) -> Any:
         raise TelegramError(f"Telegram ответил {exc.code}: {description or exc.reason}") from None
     except (urllib.error.URLError, OSError) as exc:
         raise TelegramNetworkError(f"нет связи с Telegram: {exc}") from None
+    except ValueError:
+        raise TelegramNetworkError("Telegram вернул повреждённый ответ") from None
+    if not isinstance(answer, dict):
+        raise TelegramNetworkError("Telegram вернул повреждённый ответ")
     if not answer.get("ok"):
         raise TelegramError(f"Telegram: {answer.get('description')}")
     return answer.get("result")
