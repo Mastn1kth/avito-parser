@@ -8,7 +8,7 @@ from typing import Any
 import goods
 
 
-INTEL = re.compile(r"\b(?:intel\s+)?(?:core\s+)?i([3579])[-\s]?(\d{3,5})\b", re.I)
+INTEL = re.compile(r"\b(?:intel\s+)?(?:core\s+)?i([3579])[-\s]?(\d{3,5})(KF|F|K|T)?\b", re.I)
 RYZEN = re.compile(r"\b(?:amd\s+)?ryzen\s+([3579])\s*(\d{4})[a-z]?\b", re.I)
 GPU = re.compile(r"\b(?:geforce\s+|radeon\s+)?(gtx|rtx|gt|rx)\s*[- ]?(\d{3,4})\s*(ti|super)?\b", re.I)
 RAM = re.compile(
@@ -38,6 +38,8 @@ def group_key(item: dict[str, Any]) -> str | None:
         model = intel[2]
         generation = int(model[:-3])
         cpu = f"Core i{intel[1]}, поколение {generation}"
+        if intel[3]:
+            cpu += f", серия {intel[3].upper()}"
     elif ryzen:
         cpu = f"Ryzen {ryzen[1]}, серия {ryzen[2][0]}000"
     else:

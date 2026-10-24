@@ -107,7 +107,7 @@ def process_partition(client, partition, directory, queue, notifier, status, con
                 fields["price_assessment"] = "цену оценить нельзя: не указаны процессор, ОЗУ или видеокарта"
                 fields["notes"].append("уточните комплектацию у продавца")
             price = candidate.listing.price
-            within_budget = not config["max_price"] or (price and price <= config["max_price"])
+            within_budget = bool(price and (not config["max_price"] or price <= config["max_price"]))
             fields = listing_quality.inspect(item, fields, "pc")
             if (within_budget and fields["quality_ok"] and avito.is_fresh(avito.listed_since(item), 3) and
                     avito.discount_matches(fields, config["min_discount_pct"])):

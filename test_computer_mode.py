@@ -50,6 +50,27 @@ def test_deals_ignore_stale_partition(tmp_path, monkeypatch):
     assert "Пока нет" in mode.deals_text()
 
 
+def test_unpriced_pc_is_not_sent_when_budget_and_discount_are_unlimited(tmp_path, monkeypatch):
+    import avito
+
+    monkeypatch.setattr(avito, "is_fresh", lambda *args: True)
+    batch = [item(1, 10000)]
+    client = SimpleNamespace(page=lambda **kw: avito_client.Page(1, tuple(batch), len(batch), 50))
+    queue = alert_queue.AlertQueue(tmp_path / "alerts.sqlite3")
+    config = {"min_discount_pct": 0, "max_price": 0}
+    try:
+        mode.process_partition(client, ("intel-i5", "системный блок i5"), tmp_path, queue,
+                               SimpleNamespace(chat_id=42), {}, config)
+        unpriced = item(2, 0)
+        unpriced.pop("priceDetailed")
+        batch[:] = [unpriced]
+        mode.process_partition(client, ("intel-i5", "системный блок i5"), tmp_path, queue,
+                               SimpleNamespace(chat_id=42), {}, config)
+        assert queue.pending_count() == 0
+    finally:
+        queue.close()
+
+
 def test_failed_fetch_does_not_prime_partition(tmp_path):
     def fail(**kwargs):
         raise RuntimeError("offline")

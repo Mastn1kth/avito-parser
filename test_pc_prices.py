@@ -33,6 +33,15 @@ def test_pc_group_requires_cpu_and_ram_and_separates_graphics():
     assert unknown != pc_prices.group_key(first)
 
 
+def test_intel_suffixes_are_recognized_but_not_mixed_with_other_cpu_classes():
+    title = "ПК i5-12400{}, 16 ГБ ОЗУ, RTX 3060"
+    groups = {suffix: pc_prices.group_key(pc(index, 15000, title=title.format(suffix)))
+              for index, suffix in enumerate(("", "F", "K", "KF", "T"), 1)}
+    assert all(groups.values())
+    assert len(set(groups.values())) == len(groups)
+    assert pc_prices.group_key(pc(6, 15000, title="ПК i7-9700K, 16 ГБ ОЗУ, GTX 1660"))
+
+
 def test_pc_reference_separates_graphics_bundle_and_incomplete(tmp_path):
     base = {
         str(i): pc(i, price, title="ПК i5-4460, 8 ГБ ОЗУ, GTX 750 Ti", description="Рабочий")
