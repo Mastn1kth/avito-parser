@@ -259,7 +259,10 @@ def telegram_menu() -> None:
         ["Подключить своего бота" if not connected else "Подключить заново", "Отправить тестовое сообщение"],
     )
     if action == 0:
-        run(avito.cmd_telegram, action="setup", new_token=connected)
+        if run(avito.cmd_telegram, action="setup", new_token=connected):
+            import bot_launcher
+
+            bot_launcher.start_bot(restart=True)
     elif action == 1:
         run(avito.cmd_telegram, action="test", new_token=False)
 
