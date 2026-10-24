@@ -17,6 +17,8 @@ import bot_jobs
 import bot_outbox
 import presets
 import iphone_mode
+import computer_mode
+import laptop_mode
 import search_wizard
 import search_settings
 import telegram_notify
@@ -92,6 +94,7 @@ class Bot:
         self.pending_deletes: dict[str, str] = {}
         self.awaiting_link = False
         self.wizard = search_wizard.SearchWizard(self)
+        self.awaiting_mode_budget = None
 
     def send(self, message: str, markup: dict | None = None) -> None:
         payload = {"chat_id": self.chat_id, "text": message[:3900]}
@@ -155,6 +158,53 @@ class Bot:
                 return
             iphone_mode.set_discount(int(value))
         self.iphone_mode_menu()
+
+    def ready_mode_menu(self, kind):
+        module = {"pc": computer_mode, "laptop": laptop_mode}[kind]
+        running = self.jobs.watch_running() and self.jobs.watch_names == [module.NAME]
+        self.send(module.status_text(running), buttons([
+            ("▶ Запустить режим", f"ready:{kind}:start"),
+            ("📊 Статус", f"ready:{kind}:status"),
+            ("💰 Найденные предложения", f"ready:{kind}:deals"),
+            ("💵 Лимит цены", f"ready:{kind}:budget"),
+            ("Все подходящие", f"ready:{kind}:discount:0"),
+            ("Дешевле на 15%", f"ready:{kind}:discount:15"),
+            ("Дешевле на 25%", f"ready:{kind}:discount:25"),
+            ("⏹ Остановить режим", f"ready:{kind}:stop"),
+            ("🚀 Готовые режимы", "modes"),
+        ]))
+
+    def ready_mode_action(self, raw):
+        kind, _, action = raw.partition(":")
+        module = {"pc": computer_mode, "laptop": laptop_mode}.get(kind)
+        if module is None:
+            return
+        if action == "start":
+            if self.jobs.watch_running() or self.jobs.busy:
+                self.send("Сначала остановите текущее наблюдение и дождитесь других операций.")
+                return
+            if not self.jobs.start_watch([module.NAME]):
+                self.send(self.jobs.last_watch_error or "Режим не запустился.")
+                return
+        elif action == "stop":
+            if self.jobs.watch_names == [module.NAME]:
+                self.jobs.stop_watch()
+        elif action == "deals":
+            self.send(module.deals_text())
+            return
+        elif action == "budget":
+            self.awaiting_mode_budget = kind
+            self.send("Введите максимальную цену в рублях одним сообщением. 0 — без лимита. /start — отмена.")
+            return
+        elif action.startswith("discount:"):
+            percent = action.partition(":")[2]
+            if percent not in ("0", "15", "25"):
+                return
+            if kind == "pc":
+                module.set_discount(int(percent))
+            else:
+                module.configure(min_discount_pct=int(percent))
+        self.ready_mode_menu(kind)
 
     def select_searches(self) -> None:
         names = [path.stem for path in sorted(avito.SEARCHES_DIR.glob("*.json"))]
@@ -262,6 +312,7 @@ class Bot:
         if command in ("/start", "/help", "/add", "/new"):
             self.wizard.state = None
             self.awaiting_link = False
+            self.awaiting_mode_budget = None
         if command in ("/start", "/help"):
             self.awaiting_link = False
             self.send("Управление поисками Авито. Выберите действие кнопкой внизу. "
@@ -270,7 +321,11 @@ class Bot:
         elif command == "/new":
             self.wizard.start()
         elif command == "/modes":
-            self.send("Готовые режимы:", buttons([("📱 Все iPhone · вся Россия", "iphones:status")]))
+            self.send("Готовые режимы по всей России:", buttons([
+                ("📱 Все iPhone", "iphones:status"),
+                ("🖥️ Готовые ПК", "ready:pc:status"),
+                ("💻 Ноутбуки", "ready:laptop:status"),
+            ]))
         elif command == "/presets":
             self.show_presets()
         elif command in ("/searches", "/list"):
@@ -281,6 +336,10 @@ class Bot:
             if self.jobs.watch_names == [iphone_mode.NAME]:
                 self.iphone_mode_menu()
                 return
+            for kind, module in (("pc", computer_mode), ("laptop", laptop_mode)):
+                if self.jobs.watch_names == [module.NAME]:
+                    self.ready_mode_menu(kind)
+                    return
             running = ", ".join(self.jobs.watch_names) if self.jobs.watch_running() else "не запущено"
             self.send(f"Наблюдение: {running}. Долгие операции: {', '.join(sorted(self.jobs.busy)) or 'нет'}.")
         elif command == "/test":
@@ -343,6 +402,10 @@ class Bot:
             action, _, name = str(callback.get("data") or "").partition(":")
             if action == "iphones":
                 self.iphone_mode_action(name)
+            elif action == "ready":
+                self.ready_mode_action(name)
+            elif action == "modes":
+                self.execute("/modes")
             elif action == "wizard":
                 self.wizard.callback(name)
             elif action == "preset":
@@ -400,6 +463,19 @@ class Bot:
             return
         if text in MENU_BUTTONS:
             self.execute(MENU_BUTTONS[text])
+            return
+        if self.awaiting_mode_budget and not text.startswith("/"):
+            value = text.replace(" ", "")
+            if not value.isascii() or not value.isdigit() or int(value) > 10_000_000:
+                self.send("Введите число от 0 до 10 000 000 ₽. 0 — без лимита.")
+                return
+            kind = self.awaiting_mode_budget
+            self.awaiting_mode_budget = None
+            if kind == "pc":
+                computer_mode.set_budget(int(value))
+            else:
+                laptop_mode.configure(max_price=int(value))
+            self.ready_mode_menu(kind)
             return
         if self.wizard.state and not text.startswith("/"):
             self.wizard.text(text)
