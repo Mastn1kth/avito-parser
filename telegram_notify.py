@@ -181,6 +181,8 @@ def goods_message(search_title: str, alert: dict[str, Any], icon: str = "📱") 
     if alert.get("reference_count"):
         lines.append(f"📊 В расчёте: {esc(alert['reference_count'])} объявлений. "
                      "Медиана цен предложений, не завершённых сделок.")
+    if alert.get("reasons"):
+        lines.append("Основание: " + esc("; ".join(alert["reasons"])))
     if alert.get("listed_at"):
         lines.append(f"🕒 в выдаче с {esc(alert['listed_at'])}")
     if alert.get("avito_badge"):
