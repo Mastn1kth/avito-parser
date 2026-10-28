@@ -185,6 +185,21 @@ def status_text(running: bool) -> str:
     return "\n".join(rows)
 
 
+def deliver_pending(queue: alert_queue.AlertQueue, notifier: telegram_notify.Notifier,
+                    state: dict, directory: Path) -> None:
+    """Flush saved alerts before scanning and after each completed feed."""
+    try:
+        for _ in range(10):
+            if not queue.drain_digest(notifier):
+                break
+    except telegram_notify.TelegramError as exc:
+        state["delivery_error"] = str(exc)[:180]
+    else:
+        state["delivery_error"] = None
+    state["pending"] = queue.pending_count()
+    apartments.save_json(directory / "status.json", state)
+
+
 def run() -> None:
     import avito
 
@@ -202,6 +217,7 @@ def run() -> None:
     try:
         with watch_lock.watch_locks(avito.DATA_DIR, [NAME]):
             avito.say("WATCH", searches=[NAME], interval_s=INTERVAL_SECONDS, telegram=True)
+            deliver_pending(queue, notifier, state, DIRECTORY)
             while True:
                 for feed in FEEDS:
                     state["current"] = feed.title
@@ -212,17 +228,7 @@ def run() -> None:
                     except (RuntimeError, ValueError, OSError, *avito_client.TRANSPORT_ERRORS) as exc:
                         info["error"] = f"{type(exc).__name__}: {exc}"[:180]
                         avito.say("ERROR", search=feed.key, error=info["error"])
-                    state["pending"] = queue.pending_count()
-                    apartments.save_json(DIRECTORY / "status.json", state)
-                try:
-                    for _ in range(10):
-                        if not queue.drain_digest(notifier):
-                            break
-                except telegram_notify.TelegramError as exc:
-                    state["delivery_error"] = str(exc)[:180]
-                else:
-                    state["delivery_error"] = None
-                state["pending"] = queue.pending_count()
+                    deliver_pending(queue, notifier, state, DIRECTORY)
                 state["current"] = None
                 state["round_completed_at"] = time.time()
                 apartments.save_json(DIRECTORY / "status.json", state)

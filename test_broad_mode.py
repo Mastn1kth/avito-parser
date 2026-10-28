@@ -1,11 +1,13 @@
 """The broad feed keeps every newly observed listing and batches delivery."""
 
+import json
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlsplit
 
 import alert_queue
 import avito_client
 import broad_mode
+import telegram_notify
 
 
 def item(ident, title, price):
@@ -80,6 +82,40 @@ def test_digest_remains_pending_after_send_failure(tmp_path):
             pass
         else:
             assert False, "send should fail"
+        assert queue.pending_count() == 1
+    finally:
+        queue.close()
+
+
+def test_saved_backlog_is_sent_before_a_new_scan(tmp_path):
+    queue = alert_queue.AlertQueue(tmp_path / "pending.sqlite3")
+    queue.enqueue("1", 42, "Первое объявление")
+    sent = []
+    state = {"feeds": {}}
+    try:
+        broad_mode.deliver_pending(queue, SimpleNamespace(chat_id=42, send=sent.append),
+                                   state, tmp_path)
+        assert len(sent) == 1
+        assert "Первое объявление" in sent[0]
+        assert queue.pending_count() == 0
+        assert json.loads((tmp_path / "status.json").read_text(encoding="utf-8"))["pending"] == 0
+    finally:
+        queue.close()
+
+
+def test_delivery_error_keeps_backlog_for_next_feed(tmp_path):
+    queue = alert_queue.AlertQueue(tmp_path / "pending.sqlite3")
+    queue.enqueue("1", 42, "Первое объявление")
+
+    def fail(_message):
+        raise telegram_notify.TelegramNetworkError("offline")
+
+    state = {"feeds": {}}
+    try:
+        broad_mode.deliver_pending(queue, SimpleNamespace(chat_id=42, send=fail),
+                                   state, tmp_path)
+        assert state["pending"] == 1
+        assert "offline" in state["delivery_error"]
         assert queue.pending_count() == 1
     finally:
         queue.close()
