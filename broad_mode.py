@@ -55,7 +55,12 @@ FEEDS = (
     Feed("laptops", "Ноутбуки", "/noutbuki", "98"),
     Feed("pcs", "Готовые ПК", "/nastolnye_kompyutery", "31"),
     Feed("components", "Комплектующие", "/tovary_dlya_kompyutera", "101"),
-    Feed("printers", "3D-принтеры", "", query="3D принтер"),
+    Feed("components-gpu", "Видеокарты", "/tovary_dlya_kompyutera", "101", "видеокарта"),
+    Feed("components-cpu", "Процессоры", "/tovary_dlya_kompyutera", "101", "процессор"),
+    Feed("components-ram", "Оперативная память", "/tovary_dlya_kompyutera", "101", "оперативная память"),
+    Feed("components-motherboard", "Материнские платы", "/tovary_dlya_kompyutera", "101", "материнская плата"),
+    Feed("components-storage", "Накопители", "/tovary_dlya_kompyutera", "101", "SSD"),
+    Feed("components-psu", "Блоки питания", "/tovary_dlya_kompyutera", "101", "блок питания"),
 )
 
 
@@ -88,7 +93,7 @@ def _offer(item: dict, feed: Feed) -> goods.Offer:
         offer = goods.offer_from_item(item)
         if feed.key == "phones":
             offer.comparable = iphone_identity.group_key(offer.listing.title) is not None
-        elif feed.key in ("components", "printers"):
+        elif feed.key.startswith("components"):
             offer.comparable = False
     return offer
 

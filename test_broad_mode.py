@@ -1,6 +1,7 @@
 """The broad feed keeps every newly observed listing and batches delivery."""
 
 from types import SimpleNamespace
+from urllib.parse import parse_qs, urlsplit
 
 import alert_queue
 import avito_client
@@ -11,6 +12,19 @@ def item(ident, title, price):
     return {"id": ident, "title": title, "priceDetailed": {"value": price},
             "sortTimeStamp": 1_800_000_000_000,
             "urlPath": f"/moskva/telefony/test_{ident}"}
+
+
+def test_component_feeds_replace_printers_with_focused_queries():
+    focused = broad_mode.FEEDS[4:]
+    assert {feed.key for feed in focused} == {
+        "components-gpu", "components-cpu", "components-ram",
+        "components-motherboard", "components-storage", "components-psu",
+    }
+    assert all(feed.category_id == "101" and feed.params["q"] == feed.query
+               and parse_qs(urlsplit(feed.url).query)["q"] == [feed.query]
+               for feed in focused)
+    assert not any("принтер" in f"{feed.title} {feed.query}".lower()
+                   for feed in broad_mode.FEEDS)
 
 
 def test_first_pass_primes_then_new_listings_are_batched_without_duplicates(tmp_path):
