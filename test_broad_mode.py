@@ -1,0 +1,71 @@
+"""The broad feed keeps every newly observed listing and batches delivery."""
+
+from types import SimpleNamespace
+
+import alert_queue
+import avito_client
+import broad_mode
+
+
+def item(ident, title, price):
+    return {"id": ident, "title": title, "priceDetailed": {"value": price},
+            "sortTimeStamp": 1_800_000_000_000,
+            "urlPath": f"/moskva/telefony/test_{ident}"}
+
+
+def test_first_pass_primes_then_new_listings_are_batched_without_duplicates(tmp_path):
+    phones, components = broad_mode.FEEDS[0], broad_mode.FEEDS[3]
+    phone_batch = [item(i, "iPhone 13, 128 ГБ", price)
+                   for i, price in enumerate((20000, 22000, 24000), 1)]
+    component_batch = [item(20, "Видеокарта GTX 1660", 10000)]
+
+    def page(*, catalog_url, params, number):
+        batch = phone_batch if catalog_url == phones.url else component_batch
+        return avito_client.Page(number, tuple(batch), len(batch), len(batch))
+
+    client = SimpleNamespace(page=page)
+    queue = alert_queue.AlertQueue(tmp_path / "pending.sqlite3")
+    seen = broad_mode.SeenStore(tmp_path / "seen.sqlite3")
+    try:
+        broad_mode.process_feed(client, phones, tmp_path, seen, queue, 42, {})
+        broad_mode.process_feed(client, components, tmp_path, seen, queue, 42, {})
+        assert queue.pending_count() == 0
+
+        phone_batch[:] = [item(10, "iPhone 13, 128 ГБ", 17000)]
+        component_batch[:] = [item(10, "iPhone 13, 128 ГБ", 17000),
+                             item(21, "Видеокарта RTX 3060", 12000)]
+        broad_mode.process_feed(client, phones, tmp_path, seen, queue, 42, {})
+        broad_mode.process_feed(client, components, tmp_path, seen, queue, 42, {})
+        assert queue.pending_count() == 2
+
+        messages = []
+        notifier = SimpleNamespace(chat_id=42, send=messages.append)
+        assert queue.drain_digest(notifier) == 2
+        assert queue.pending_count() == 0
+        assert len(messages) == 1
+        assert "на 23% дешевле медианы" in messages[0]
+        assert "цену оценить нельзя" in messages[0]
+        assert messages[0].count("iPhone 13") == 1
+    finally:
+        queue.close()
+        seen.close()
+
+
+def test_digest_remains_pending_after_send_failure(tmp_path):
+    queue = alert_queue.AlertQueue(tmp_path / "pending.sqlite3")
+    queue.enqueue("1", 42, "<b>Объявление</b>")
+
+    def fail(_message):
+        raise RuntimeError("offline")
+
+    try:
+        notifier = SimpleNamespace(chat_id=42, send=fail)
+        try:
+            queue.drain_digest(notifier)
+        except RuntimeError:
+            pass
+        else:
+            assert False, "send should fail"
+        assert queue.pending_count() == 1
+    finally:
+        queue.close()

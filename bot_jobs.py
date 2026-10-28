@@ -91,7 +91,7 @@ class Jobs:
             flags = subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0
             try:
                 modes = {"mode-iphones": "iphone_mode.py", "mode-computers": "computer_mode.py",
-                         "mode-laptops": "laptop_mode.py"}
+                         "mode-laptops": "laptop_mode.py", "mode-broad": "broad_mode.py"}
                 command = ([sys.executable, modes[names[0]]] if len(names) == 1 and names[0] in modes else
                            [sys.executable, "avito.py", "--json", "watch", *names])
                 self.watch = subprocess.Popen(
@@ -165,7 +165,7 @@ class Jobs:
             return False
         if not isinstance(names, list) or not names or not all(
             isinstance(name, str) and re.fullmatch(r"[a-z0-9_-]+", name)
-            and (name in ("mode-iphones", "mode-computers", "mode-laptops")
+            and (name in ("mode-iphones", "mode-computers", "mode-laptops", "mode-broad")
                  or (ROOT / "searches" / f"{name}.json").exists())
             for name in names
         ):

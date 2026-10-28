@@ -28,6 +28,26 @@ class AlertQueue:
             with self.db:
                 self.db.execute("UPDATE alerts SET delivered=1, text='' WHERE id=?", (item_id,))
 
+    def drain_digest(self, notifier, *, limit=20, max_chars=3500):
+        """Send queued alert lines in one bounded Telegram message."""
+        rows = self.db.execute("SELECT id, text FROM alerts WHERE delivered=0 AND chat_id=? "
+                               "ORDER BY created, id LIMIT ?", (notifier.chat_id, limit)).fetchall()
+        if not rows:
+            return 0
+        header = "🆕 Новые объявления по электронике:\n\n"
+        selected = []
+        length = len(header)
+        for item_id, line in rows:
+            if selected and length + len(line) + 2 > max_chars:
+                break
+            selected.append((item_id, line))
+            length += len(line) + 2
+        notifier.send(header + "\n\n".join(line for _, line in selected))
+        with self.db:
+            self.db.executemany("UPDATE alerts SET delivered=1, text='' WHERE id=?",
+                                [(item_id,) for item_id, _ in selected])
+        return len(selected)
+
     def pending_count(self):
         return self.db.execute("SELECT count(*) FROM alerts WHERE delivered=0").fetchone()[0]
 

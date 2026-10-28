@@ -85,3 +85,18 @@ def test_iphone_mode_launch_and_resume_without_search_files(monkeypatch, tmp_pat
         assert jobs.watch_names == ["mode-iphones"]
     finally:
         jobs.stop_watch()
+
+
+def test_broad_mode_resumes_without_search_files(monkeypatch, tmp_path):
+    (tmp_path / "broad_mode.py").write_text(
+        'import time\nprint(\'{"event":"WATCH"}\', flush=True)\n'
+        'while True:\n    time.sleep(1)\n', encoding="utf-8")
+    monkeypatch.setattr(bot_jobs, "ROOT", tmp_path)
+    jobs = bot_jobs.Jobs()
+    assert jobs.start_watch(["mode-broad"])
+    jobs.stop_watch(preserve_selection=True)
+    try:
+        assert jobs.resume_watch()
+        assert jobs.watch_names == ["mode-broad"]
+    finally:
+        jobs.stop_watch()
