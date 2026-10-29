@@ -52,8 +52,9 @@ class Feed:
         return result
 
 
+PHONE_FEEDS = (Feed("phones", "Телефоны", "/telefony", "84"),)
+
 FEEDS = (
-    Feed("phones", "Телефоны", "/telefony", "84"),
     Feed("laptops", "Ноутбуки", "/noutbuki", "98"),
     Feed("pcs", "Готовые ПК", "/nastolnye_kompyutery", "31"),
     Feed("components", "Комплектующие", "/tovary_dlya_kompyutera", "101"),
@@ -177,10 +178,11 @@ def process_feed(client, feed: Feed, directory: Path, seen: SeenStore,
                   primed=True, error=None)
 
 
-def status_text(running: bool) -> str:
-    state = apartments.load_seen(DIRECTORY / "status.json")
-    rows = ["📡 Все новые: электроника · вся Россия", "Работает" if running else "Остановлен"]
-    for feed in FEEDS:
+def status_text(running: bool, *, feeds=FEEDS, directory: Path = DIRECTORY,
+                title: str = "Все новые: электроника") -> str:
+    state = apartments.load_seen(directory / "status.json")
+    rows = [f"📡 {title} · вся Россия", "Работает" if running else "Остановлен"]
+    for feed in feeds:
         info = state.get("feeds", {}).get(feed.key, {})
         checked = info.get("checked_at")
         when = datetime.fromtimestamp(checked).strftime("%d.%m %H:%M") if checked else "ещё не проверено"
@@ -208,39 +210,39 @@ def deliver_pending(queue: alert_queue.AlertQueue, notifier: telegram_notify.Not
     apartments.save_json(directory / "status.json", state)
 
 
-def run() -> None:
+def run(*, feeds=FEEDS, directory: Path = DIRECTORY, name: str = NAME) -> None:
     import avito
 
     avito.use_utf8_output()
     avito.JSON_OUTPUT = True
-    DIRECTORY.mkdir(parents=True, exist_ok=True)
+    directory.mkdir(parents=True, exist_ok=True)
     notifier = telegram_notify.Notifier.from_settings()
     if notifier is None:
         raise SystemExit("Сначала подключите Telegram-бота.")
-    queue = alert_queue.AlertQueue(DIRECTORY / "pending-alerts.sqlite3")
-    seen = SeenStore(DIRECTORY / "seen.sqlite3")
-    state = apartments.load_seen(DIRECTORY / "status.json")
+    queue = alert_queue.AlertQueue(directory / "pending-alerts.sqlite3")
+    seen = SeenStore(directory / "seen.sqlite3")
+    state = apartments.load_seen(directory / "status.json")
     state.setdefault("feeds", {})
     client = avito_client.CalmClient(log=avito.say)
     try:
-        with watch_lock.watch_locks(avito.DATA_DIR, [NAME]):
-            avito.say("WATCH", searches=[NAME], interval_s=INTERVAL_SECONDS, telegram=True)
-            deliver_pending(queue, notifier, state, DIRECTORY)
+        with watch_lock.watch_locks(avito.DATA_DIR, [name]):
+            avito.say("WATCH", searches=[name], interval_s=INTERVAL_SECONDS, telegram=True)
+            deliver_pending(queue, notifier, state, directory)
             while True:
-                for feed in FEEDS:
+                for feed in feeds:
                     state["current"] = feed.title
-                    apartments.save_json(DIRECTORY / "status.json", state)
+                    apartments.save_json(directory / "status.json", state)
                     info = state["feeds"].setdefault(feed.key, {})
                     try:
-                        process_feed(client, feed, DIRECTORY, seen, queue, notifier.chat_id, info,
+                        process_feed(client, feed, directory, seen, queue, notifier.chat_id, info,
                                      notifier=notifier)
                     except (RuntimeError, ValueError, OSError, *avito_client.TRANSPORT_ERRORS) as exc:
                         info["error"] = f"{type(exc).__name__}: {exc}"[:180]
                         avito.say("ERROR", search=feed.key, error=info["error"])
-                    deliver_pending(queue, notifier, state, DIRECTORY)
+                    deliver_pending(queue, notifier, state, directory)
                 state["current"] = None
                 state["round_completed_at"] = time.time()
-                apartments.save_json(DIRECTORY / "status.json", state)
+                apartments.save_json(directory / "status.json", state)
                 time.sleep(INTERVAL_SECONDS)
     except KeyboardInterrupt:
         pass

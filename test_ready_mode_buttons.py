@@ -2,6 +2,7 @@ import bot_server
 import computer_mode
 import laptop_mode
 import broad_mode
+import phone_mode
 import telegram_notify
 from test_bot_server import FakeJobs
 
@@ -78,3 +79,17 @@ def test_broad_mode_is_available_from_telegram_buttons(monkeypatch, tmp_path):
     bot.handle({"callback_query": {"id": "broad", "from": {"id": 42},
                                    "message": {"chat": {"id": 42}}, "data": "broad:start"}})
     assert jobs.started == [("watch", [broad_mode.NAME])]
+
+
+def test_phone_mode_has_separate_button_and_watch(monkeypatch, tmp_path):
+    monkeypatch.setattr(phone_mode, "DIRECTORY", tmp_path)
+    sent = []
+    monkeypatch.setattr(telegram_notify, "call", lambda token, method, payload=None: sent.append((method, payload)))
+    jobs = FakeJobs()
+    bot = bot_server.Bot("token", 42, jobs)
+    bot.execute("/modes")
+    actions = [row[0]["callback_data"] for row in sent[-1][1]["reply_markup"]["inline_keyboard"]]
+    assert "phones:status" in actions
+    bot.handle({"callback_query": {"id": "phones", "from": {"id": 42},
+                                   "message": {"chat": {"id": 42}}, "data": "phones:start"}})
+    assert jobs.started == [("watch", [phone_mode.NAME])]

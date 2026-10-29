@@ -20,6 +20,7 @@ import iphone_mode
 import computer_mode
 import laptop_mode
 import broad_mode
+import phone_mode
 import search_wizard
 import search_settings
 import telegram_notify
@@ -230,6 +231,23 @@ class Bot:
             self.jobs.stop_watch()
         self.broad_mode_menu()
 
+    def phone_mode_action(self, action: str) -> None:
+        if action == "start":
+            if self.jobs.watch_running() or self.jobs.busy:
+                self.send("Сначала остановите текущее наблюдение и дождитесь других операций.")
+                return
+            if not self.jobs.start_watch([phone_mode.NAME]):
+                self.send(self.jobs.last_watch_error or "Режим не запустился.")
+                return
+        elif action == "stop" and self.jobs.watch_names == [phone_mode.NAME]:
+            self.jobs.stop_watch()
+        running = self.jobs.watch_running() and self.jobs.watch_names == [phone_mode.NAME]
+        action_button = (("⏹ Остановить режим", "phones:stop") if running else
+                         ("▶ Запустить режим", "phones:start"))
+        self.send(phone_mode.status_text(running), buttons([
+            action_button, ("🚀 Готовые режимы", "modes"),
+        ]))
+
     def select_searches(self) -> None:
         names = [path.stem for path in sorted(avito.SEARCHES_DIR.glob("*.json"))]
         self.selected.intersection_update(names)
@@ -348,6 +366,7 @@ class Bot:
         elif command == "/modes":
             self.send("Готовые режимы по всей России:", buttons([
                 ("📡 Все новые: электроника", "broad:status"),
+                ("📞 Все новые: телефоны", "phones:status"),
                 ("📱 Все iPhone", "iphones:status"),
                 ("🖥️ Готовые ПК", "ready:pc:status"),
                 ("💻 Ноутбуки", "ready:laptop:status"),
@@ -359,6 +378,9 @@ class Bot:
         elif command == "/select":
             self.select_searches()
         elif command == "/status":
+            if self.jobs.watch_names == [phone_mode.NAME]:
+                self.phone_mode_action("status")
+                return
             if self.jobs.watch_names == [broad_mode.NAME]:
                 self.broad_mode_menu()
                 return
@@ -437,6 +459,8 @@ class Bot:
                 self.iphone_mode_action(name)
             elif action == "broad":
                 self.broad_mode_action(name)
+            elif action == "phones":
+                self.phone_mode_action(name)
             elif action == "ready":
                 self.ready_mode_action(name)
             elif action == "modes":
