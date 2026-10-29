@@ -17,8 +17,8 @@ def item(ident, title, price):
 
 
 def test_component_feeds_replace_printers_with_focused_queries():
-    assert not any(feed.key == "phones" for feed in broad_mode.FEEDS)
-    focused = broad_mode.FEEDS[3:]
+    assert not any(feed.key in ("phones", "laptops") for feed in broad_mode.FEEDS)
+    focused = broad_mode.FEEDS[2:]
     assert {feed.key for feed in focused} == {
         "components-gpu", "components-cpu", "components-ram",
         "components-motherboard", "components-storage", "components-psu",
@@ -31,7 +31,7 @@ def test_component_feeds_replace_printers_with_focused_queries():
 
 
 def test_first_pass_primes_then_new_listings_are_batched_without_duplicates(tmp_path):
-    phones, components = broad_mode.PHONE_FEEDS[0], broad_mode.FEEDS[2]
+    phones, components = broad_mode.PHONE_FEEDS[0], broad_mode.FEEDS[1]
     phone_batch = [item(i, "iPhone 13, 128 ГБ", price)
                    for i, price in enumerate((20000, 22000, 24000), 1)]
     component_batch = [item(20, "Видеокарта GTX 1660", 10000)]
@@ -122,7 +122,7 @@ def test_delivery_error_keeps_backlog_for_next_feed(tmp_path):
 
 
 def test_new_listing_is_sent_separately_before_next_page(tmp_path):
-    feed = broad_mode.FEEDS[2]
+    feed = broad_mode.FEEDS[1]
     sent = []
     phase = [0]
 

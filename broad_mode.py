@@ -55,7 +55,6 @@ class Feed:
 PHONE_FEEDS = (Feed("phones", "Телефоны", "/telefony", "84"),)
 
 FEEDS = (
-    Feed("laptops", "Ноутбуки", "/noutbuki", "98"),
     Feed("pcs", "Готовые ПК", "/nastolnye_kompyutery", "31"),
     Feed("components", "Комплектующие", "/tovary_dlya_kompyutera", "101"),
     Feed("components-gpu", "Видеокарты", "/tovary_dlya_kompyutera", "101", "видеокарта"),
