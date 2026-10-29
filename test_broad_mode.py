@@ -52,16 +52,15 @@ def test_first_pass_primes_then_new_listings_are_batched_without_duplicates(tmp_
                              item(21, "Видеокарта RTX 3060", 12000)]
         broad_mode.process_feed(client, phones, tmp_path, seen, queue, 42, {})
         broad_mode.process_feed(client, components, tmp_path, seen, queue, 42, {})
-        assert queue.pending_count() == 2
+        assert queue.pending_count() == 1
 
         messages = []
         notifier = SimpleNamespace(chat_id=42, send=messages.append)
-        assert queue.drain_digest(notifier) == 2
+        assert queue.drain_digest(notifier) == 1
         assert queue.pending_count() == 0
         assert len(messages) == 1
-        assert "на 23% дешевле медианы" in messages[0]
         assert "цену оценить нельзя" in messages[0]
-        assert messages[0].count("iPhone 13") == 1
+        assert "iPhone 13" not in messages[0]
     finally:
         queue.close()
         seen.close()
@@ -119,3 +118,54 @@ def test_delivery_error_keeps_backlog_for_next_feed(tmp_path):
         assert queue.pending_count() == 1
     finally:
         queue.close()
+
+
+def test_new_listing_is_sent_separately_before_next_page(tmp_path):
+    feed = broad_mode.FEEDS[3]
+    sent = []
+    phase = [0]
+
+    def page(*, catalog_url, params, number):
+        if phase[0] and number == 2:
+            assert len(sent) == 1
+        ids = range(1, 51) if not phase[0] else range(2, 52)
+        rows = tuple(item(i, "Видеокарта RTX 3060", 12000) for i in ids) if number == 1 else ()
+        return avito_client.Page(number, rows, 100, len(rows))
+
+    queue = alert_queue.AlertQueue(tmp_path / "pending.sqlite3")
+    seen = broad_mode.SeenStore(tmp_path / "seen.sqlite3")
+    notifier = SimpleNamespace(chat_id=42, send=sent.append)
+    try:
+        broad_mode.process_feed(SimpleNamespace(page=page), feed, tmp_path, seen, queue, 42, {}, notifier)
+        phase[0] = 1
+        broad_mode.process_feed(SimpleNamespace(page=page), feed, tmp_path, seen, queue, 42, {}, notifier)
+        assert len(sent) == 1
+        assert "🆕 Новые объявления" not in sent[0]
+        assert queue.pending_count() == 0
+    finally:
+        queue.close()
+        seen.close()
+
+
+def test_iphones_are_excluded_from_general_phone_feed(tmp_path):
+    feed = broad_mode.FEEDS[0]
+    rows = [item(1, "Телефон Samsung Galaxy", 10000)]
+
+    def page(**_kwargs):
+        return avito_client.Page(1, tuple(rows), len(rows), len(rows))
+
+    queue = alert_queue.AlertQueue(tmp_path / "pending.sqlite3")
+    seen = broad_mode.SeenStore(tmp_path / "seen.sqlite3")
+    sent = []
+    notifier = SimpleNamespace(chat_id=42, send=sent.append)
+    try:
+        broad_mode.process_feed(SimpleNamespace(page=page), feed, tmp_path, seen, queue, 42, {}, notifier)
+        rows[:] = [item(2, "iPhone 13, 128 ГБ", 17000),
+                   item(3, "Телефон Samsung Galaxy", 9000)]
+        broad_mode.process_feed(SimpleNamespace(page=page), feed, tmp_path, seen, queue, 42, {}, notifier)
+        assert len(sent) == 1
+        assert "Samsung" in sent[0]
+        assert "iPhone" not in sent[0]
+    finally:
+        queue.close()
+        seen.close()

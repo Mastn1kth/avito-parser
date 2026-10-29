@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+import re
 import time
 from dataclasses import dataclass
 from datetime import datetime
@@ -25,6 +26,7 @@ NAME = "mode-broad"
 INTERVAL_SECONDS = 180
 PAGES_PER_FEED = 2
 SAMPLE_LIMIT = 1000
+IPHONE = re.compile(r"iphone|айфон", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -139,27 +141,35 @@ def _digest_line(feed: Feed, fields: dict) -> str:
 
 
 def process_feed(client, feed: Feed, directory: Path, seen: SeenStore,
-                 queue: alert_queue.AlertQueue, chat_id: int, status: dict) -> None:
+                 queue: alert_queue.AlertQueue, chat_id: int, status: dict,
+                 notifier: telegram_notify.Notifier | None = None) -> None:
     path = directory / "feeds" / f"{feed.key}.json"
     state = apartments.load_seen(path)
     base = state.get("items", {})
     initial = not state.get("primed")
     references = _references(base, feed)
     batch: dict[str, dict] = {}
+    found = 0
+    delivery_failed = False
     for number in range(1, PAGES_PER_FEED + 1):
         page = client.page(catalog_url=feed.url, params=feed.params, number=number)
         for item in page.items:
-            batch[str(item["id"])] = item
+            item_id = str(item["id"])
+            batch[item_id] = item
+            if not seen.contains(item_id):
+                if not initial and not IPHONE.search(str(item.get("title") or "")):
+                    queue.enqueue(item_id, chat_id, _digest_line(feed, _fields(item, feed, references)))
+                    found += 1
+                    if notifier and not delivery_failed:
+                        try:
+                            queue.drain(notifier, limit=1)
+                        except telegram_notify.TelegramError as exc:
+                            status["delivery_error"] = str(exc)[:180]
+                            delivery_failed = True
+                seen.add(item_id)
+            base[item_id] = item
         if page.is_last:
             break
-    found = 0
-    for item_id, item in batch.items():
-        if not seen.contains(item_id):
-            if not initial:
-                queue.enqueue(item_id, chat_id, _digest_line(feed, _fields(item, feed, references)))
-                found += 1
-            seen.add(item_id)
-        base[item_id] = item
     recent = sorted(base.items(), key=lambda entry: entry[1].get("sortTimeStamp") or 0,
                     reverse=True)[:SAMPLE_LIMIT]
     apartments.save_json(path, {"items": dict(recent), "primed": True})
@@ -189,9 +199,7 @@ def deliver_pending(queue: alert_queue.AlertQueue, notifier: telegram_notify.Not
                     state: dict, directory: Path) -> None:
     """Flush saved alerts before scanning and after each completed feed."""
     try:
-        for _ in range(10):
-            if not queue.drain_digest(notifier):
-                break
+        queue.drain(notifier, limit=200)
     except telegram_notify.TelegramError as exc:
         state["delivery_error"] = str(exc)[:180]
     else:
@@ -224,7 +232,8 @@ def run() -> None:
                     apartments.save_json(DIRECTORY / "status.json", state)
                     info = state["feeds"].setdefault(feed.key, {})
                     try:
-                        process_feed(client, feed, DIRECTORY, seen, queue, notifier.chat_id, info)
+                        process_feed(client, feed, DIRECTORY, seen, queue, notifier.chat_id, info,
+                                     notifier=notifier)
                     except (RuntimeError, ValueError, OSError, *avito_client.TRANSPORT_ERRORS) as exc:
                         info["error"] = f"{type(exc).__name__}: {exc}"[:180]
                         avito.say("ERROR", search=feed.key, error=info["error"])
